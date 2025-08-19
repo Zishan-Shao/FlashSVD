@@ -1,4 +1,4 @@
-# FlashSVD: Efficient Transformer Architecture with Low-Rank Decomposition
+# FlashSVD: Memory-Efficient Inference with Streaming for Low-Rank Models
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
