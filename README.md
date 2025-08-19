@@ -3,24 +3,17 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 
-This repository contains the official implementation of **FlashSVD**, a novel approach for efficient transformer architectures using low-rank SVD decomposition. FlashSVD significantly reduces computational complexity and memory usage while maintaining model performance across various NLP tasks.
+This repository contains the official implementation of **FlashSVD**, a novel end-to-end rank-aware streaming inference framework specifically designed for SVD-compressed large language models. FlashSVD addresses the critical limitation of previous SVD-based compression techniques by eliminating activation memory overhead during inference.
 
-## Table of Contents
 
-- [Overview](#overview)
-- [Key Features](#key-features)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Usage Examples](#usage-examples)
-- [Benchmarking](#benchmarking)
-- [Model Architecture](#model-architecture)
-- [Results](#results)
-- [Citation](#citation)
-- [License](#license)
+**Paper**: [FlashSVD: Memory-Efficient Inference with Streaming for Low-Rank Models](https://arxiv.org/abs/2508.01506)
+
 
 ## Overview
 
-FlashSVD introduces an efficient transformer architecture that leverages Singular Value Decomposition (SVD) to reduce the computational complexity of attention mechanisms and feed-forward networks. The approach achieves significant speedup and memory reduction while maintaining competitive performance on standard NLP benchmarks.
+Singular Value Decomposition (SVD) has recently seen a surge of interest as a simple yet powerful tool for large language models (LLMs) compression, with a growing number of works demonstrating 20-80% parameter reductions at minimal accuracy loss. However, previous SVD-based approaches have focused primarily on reducing the memory footprint of model weights, largely overlooking the additional activation memory overhead incurred during inference when applying truncated factors via standard dense CUDA kernels.
+
+Our experiments demonstrate that this activation overhead, scaling with sequence length and hidden dimension, prevents current SVD compression techniques from achieving any reduction in peak inference memory, thereby limiting their viability for real-world, on-device deployments.
 
 ### Pipeline
 
@@ -31,17 +24,20 @@ The figure above illustrates the FlashSVD computation pipeline, showing the effi
 
 ### Key Contributions
 
-- **Low-Rank Attention**: Efficient attention computation using SVD decomposition
-- **Optimized FFN**: Streamlined feed-forward networks with reduced parameters
-- **Memory-Efficient**: Significant reduction in GPU memory usage
-- **Performance-Preserving**: Maintains accuracy across GLUE benchmark tasks
+We introduce **FlashSVD**, a novel, end-to-end rank-aware streaming inference framework specifically designed for SVD-compressed large language models. FlashSVD can be seamlessly integrated with any model that employs SVD-based methods for parameter reduction. By fusing low-rank projection kernels directly into both the self-attention and feed-forward network (FFN) pipelines, FlashSVD avoids materializing full-size activation buffers. Instead, small tiles of the truncated factors are loaded into on-chip SRAM, multiplied and reduced on the fly, and immediately evicted, preserving high GPU occupancy and adding no extra latency.
+
+- **End-to-End Streaming Framework**: Rank-aware inference system for SVD-compressed models
+- **Fused Low-Rank Kernels**: Direct integration into attention and FFN pipelines  
+- **Tile-Based Computation**: Avoids materializing full-size activation buffers
+- **Memory-Efficient Deployment**: Up to 70.2% reduction in peak activation memory
 
 ## Key Features
 
-- **Multiple Model Support**: BERT, RoBERTa, and RoBERTa-Large implementations
-- **Flexible Rank Configuration**: Adjustable rank parameters for attention and FFN
-- **Easy Integration**: Available triton kernel for direct drop-in in forward process
-- **CUDA Optimized**: Efficient GPU implementations using Triton kernels
+- **Universal Integration**: Seamlessly works with any SVD-compressed model
+- **Streaming Inference**: Tile-based computation avoids activation buffer materialization
+- **GPU Optimized**: Fused kernels preserve high GPU occupancy with no extra latency
+- **Memory Efficient**: Up to 70.2% reduction in peak activation memory
+- **Accuracy Preserving**: No accuracy loss with upstream compression methods
 
 ## Installation
 
@@ -152,7 +148,7 @@ If you find this work useful in your research, please cite our paper:
 }
 ```
 
-**Paper**: [FlashSVD: Memory-Efficient Inference with Streaming for Low-Rank Models](https://arxiv.org/abs/2508.01506)
+<!-- **Paper**: [FlashSVD: Memory-Efficient Inference with Streaming for Low-Rank Models](https://arxiv.org/abs/2508.01506) -->
 
 ## Project Structure
 
