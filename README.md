@@ -35,7 +35,7 @@ We introduce **FlashSVD**, a novel, end-to-end rank-aware streaming inference fr
 
 - **Universal Integration**: Seamlessly works with any SVD-compressed model
 - **Streaming Inference**: Tile-based computation avoids activation buffer materialization
-- **GPU Optimized**: Fused kernels preserve high GPU occupancy with no extra latency
+- **GPU Optimized**: Fused kernels preserve high GPU occupancy with no extra latency on medium-low ranked cases
 - **Memory Efficient**: Up to 70.2% reduction in peak activation memory
 - **Accuracy Preserving**: No accuracy loss with upstream compression methods
 
