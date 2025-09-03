@@ -10,7 +10,13 @@ This repository contains the official implementation of **FlashSVD**, a novel en
 
 
 ## Announcement
-Our system involves have replication of Fisher-Weighted SVD (FWSVD) method of the paper: [Language model compression with weighted low-rank factorization](https://arxiv.org/abs/2207.00112) for BERT, RoBERTa, and ModernBERT, currently working on Llama, Qwen, and GPT2 in the upcoming versions. The related methods such as: ASVD, SVD-LLM, Dobi-SVD, AdaSVD will also be included in a user-friendly supports with FlashSVD for efficient inference.
+Our system involves have several popular SVD method replication with code:
+
+ - [Language model compression with weighted low-rank factorization](https://arxiv.org/abs/2207.00112): Fisher-Weighted SVD (FWSVD) is supported for BERT, RoBERTa, and ModernBERT
+ - [DRONE: Data-aware Low-rank Compression for Large NLP Models](https://proceedings.neurips.cc/paper/2021/file/f56de5ef149cf0aedcc8f4797031e229-Paper.pdf): data whitening method enabled now on BERT
+ - [Adaptive Rank Selections for Low-Rank Approximation of Language Models](https://aclanthology.org/2024.naacl-long.13/): AdaSVD code on BERT
+
+**TODO:** currently working on Llama, Qwen, and GPT2 in the upcoming versions. The related methods such as: ASVD, SVD-LLM, Dobi-SVD, AdaSVD will also be included in a user-friendly supports with FlashSVD for efficient inference.
 
 
 ## Overview
