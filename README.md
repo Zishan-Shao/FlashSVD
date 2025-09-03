@@ -9,6 +9,10 @@ This repository contains the official implementation of **FlashSVD**, a novel en
 **Paper**: [FlashSVD: Memory-Efficient Inference with Streaming for Low-Rank Models](https://arxiv.org/abs/2508.01506)
 
 
+## Announcement
+Our system involves have replication of Fisher-Weighted SVD (FWSVD) method of the paper: [Language model compression with weighted low-rank factorization](https://arxiv.org/abs/2207.00112) for BERT, RoBERTa, and ModernBERT, currently working on Llama, Qwen, and GPT2 in the upcoming versions. The related methods such as: ASVD, SVD-LLM, Dobi-SVD, AdaSVD will also be included in a user-friendly supports with FlashSVD for efficient inference.
+
+
 ## Overview
 
 Singular Value Decomposition (SVD) has recently seen a surge of interest as a simple yet powerful tool for large language models (LLMs) compression, with a growing number of works demonstrating 20-80% parameter reductions at minimal accuracy loss. However, previous SVD-based approaches have focused primarily on reducing the memory footprint of model weights, largely overlooking the additional activation memory overhead incurred during inference when applying truncated factors via standard dense CUDA kernels.
