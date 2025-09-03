@@ -2,6 +2,8 @@
 # this will run modernbert with our defined code
 
 import os
+import copy
+import time
 import torch
 import torch.nn as nn
 from datasets import load_dataset
@@ -186,10 +188,114 @@ class CustomModernBERT(nn.Module):
         return out
 
 
+def _build_loader(tokenizer, seq_len=128, batch_size=8):
+    raw = load_dataset("glue", "sst2", split="validation")
+    def tok(b): return tokenizer(b["sentence"], padding="max_length", truncation=True, max_length=seq_len)
+    ds = raw.map(tok, batched=True, remove_columns=["sentence","idx"])
+    ds.set_format("torch")
+    return DataLoader(ds, batch_size, shuffle=False, collate_fn=lambda b: {
+        "input_ids": torch.stack([x["input_ids"] for x in b]),
+        "attention_mask": torch.stack([x["attention_mask"] for x in b]),
+        "labels": torch.tensor([x["label"] for x in b]),
+    })
+
+
+@torch.no_grad()
+def quick_check(model, loader, device):
+    metric = load_metric("accuracy")
+    for i, batch in enumerate(loader):
+        if i >= 3: break
+        batch = {k: v.to(device) for k, v in batch.items()}
+        out = model(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"])
+        metric.add_batch(predictions=out.logits.argmax(-1).cpu(), references=batch["labels"].cpu())
+    return metric.compute()["accuracy"]
+
+
+@torch.no_grad()
+def acc_peak_time(model, loader, device, use_mask=True):
+    metric = load_metric("accuracy")
+    # Clean memory and reset peak tracking for accurate measurement
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
+    torch.cuda.synchronize()
+    
+    steps = 0
+    start = time.perf_counter()
+    for batch in loader:
+        batch = {k: v.to(device) for k, v in batch.items()}
+        if use_mask:
+            out = model(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"]).logits
+        else:
+            out = model(input_ids=batch["input_ids"]).logits
+        metric.add_batch(predictions=out.argmax(-1).cpu(), references=batch["labels"].cpu())
+        steps += 1
+    torch.cuda.synchronize()
+    elapsed_ms = (time.perf_counter() - start) * 1000.0 / max(1, steps)
+    
+    # Peak memory during inference
+    peak_mib = torch.cuda.max_memory_allocated() / (1024**2)
+    
+    return metric.compute()["accuracy"], peak_mib, elapsed_ms
+
+
+def main():
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print("Device:", device)
+
+    cfg = AutoConfig.from_pretrained(MODEL_DIR, trust_remote_code=True)
+    cfg._attn_implementation = "sdpa"
+
+    dense = AutoModelForSequenceClassification.from_pretrained(MODEL_DIR, config=cfg, trust_remote_code=True).to(device).eval()
+    tok = AutoTokenizer.from_pretrained(MODEL_DIR, trust_remote_code=True)
+    loader = _build_loader(tok, seq_len=128*8, batch_size=32)
+
+    # Clean memory and measure baseline (original dense model)
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
+    torch.cuda.synchronize()
+    
+    # Measure baseline dense model memory
+    CACHED_ORIG_MEM = torch.cuda.max_memory_allocated() / 1024**2
+    print(f"Persistent dense model storage: {CACHED_ORIG_MEM:6.1f} MiB")
+
+    # Create custom ModernBERT wrapper
+    custom = CustomModernBERT(dense).to(device).eval()
+
+    # Measure custom model storage with GPU redundancy (before cleanup)
+    with_act = torch.cuda.max_memory_allocated() / 1024**2
+    print(f"Custom model storage with GPU Redundancy: {with_act:.1f} MiB")
+    
+    # Clean up any construction artifacts and reset for inference measurements
+    import gc
+    gc.collect()
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
+    torch.cuda.synchronize()
+    
+    # Measure the clean custom model storage (persistent baseline for inference)
+    persistent_baseline = torch.cuda.max_memory_allocated() / 1024**2
+    print(f"Persistent custom model storage: {persistent_baseline:.1f} MiB")
+    
+    # Update CACHED_ORIG_MEM to use the clean custom baseline
+    CACHED_ORIG_MEM = persistent_baseline
+
+    acc = quick_check(custom, loader, device)
+    print(f"[Sanity] Custom model accuracy on 3 batches: {acc:.4f}")
+    
+    # Comprehensive memory and latency measurement (entire validation split)
+    full_acc, peak_lr, latency_ms = acc_peak_time(custom, loader, device, use_mask=True)
+    
+    # Calculate real peak memory using the same formula as BERT profile  
+    real_peak_mib = peak_lr - with_act + CACHED_ORIG_MEM
+    transient_mib = peak_lr - CACHED_ORIG_MEM
+    
+    print(f"Custom BERT  | acc={full_acc:.4f} | peak ={peak_lr:6.1f} MiB | real peak ={real_peak_mib:6.1f} MiB | Transient={transient_mib:6.1f} MiB | {latency_ms:6.1f} ms/b")
+
+
 def test_model_replication():
     """Test that our custom ModernBERT reproduces the HF model."""
     print("=== Testing ModernBERT Replication ===")
-    BATCH_SIZE, SEQ_LEN = 4, 128
+    BATCH_SIZE, SEQ_LEN = 8, 128*4
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
@@ -308,4 +414,12 @@ def test_model_replication():
 
 
 if __name__ == "__main__":
-    test_model_replication()
+    import argparse
+    parser = argparse.ArgumentParser("ModernBERT profiling")
+    parser.add_argument("--test", action="store_true", help="Run replication test instead of profiling")
+    args = parser.parse_args()
+    
+    if args.test:
+        test_model_replication()
+    else:
+        main()

@@ -8,17 +8,20 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# NEW: import your kernels (assume they’re importable on PYTHONPATH)
+# === NEW: import current FlashSVD GEGLU APIs ===
 try:
-    from flashsvdgeglu import flashsvd_ffn_geglu  # FFN kernel
-except Exception as e:
-    flashsvd_ffn_geglu = None  # will gracefully fall back if not available
+    from flashsvdgeglu import (
+        flashsvd_ffn_geglu_autotuned as flashsvd_ffn_geglu,           # default
+        flashsvd_ffn_geglu_configured as flashsvd_ffn_geglu_pinned,   # optional pinned
+    )
+except Exception:
+    flashsvd_ffn_geglu = None
+    flashsvd_ffn_geglu_pinned = None  # will fail with an assert below if you force FlashSVD
 
 try:
     from flashsvdropeattn import FlashSVDRoPEAttention, QKVFactors  # Attn kernel
-except Exception as e:
-    FlashSVDRoPEAttention, QKVFactors = None, None  # will gracefully fall back
-
+except Exception:
+    FlashSVDRoPEAttention, QKVFactors = None, None  # will fail with an assert below if you force FlashSVD
 
 from datasets import load_dataset
 from torch.utils.data import DataLoader
@@ -77,7 +80,6 @@ class ExplicitSVDLinear(nn.Module):
         out_f, in_f = weight.shape
         dev, dt = weight.device, weight.dtype
 
-        # SVD on W^T
         with torch.no_grad():
             WT = weight.detach().t().float()              # [in, out]
             U, S, Vh = torch.linalg.svd(WT, full_matrices=False)  # U:[in,r], S:[r], Vh:[r,out]
@@ -87,16 +89,14 @@ class ExplicitSVDLinear(nn.Module):
         U_r = (U[:, :r] * S[:r]).to(dt)   # [in, r]
         V_r = Vh[:r, :].to(dt)            # [r, out]
 
-        # Register factors/bias as buffers (no gradients by default)
-        self.register_buffer("U", U_r, persistent=False)           # [in, r]
-        self.register_buffer("V", V_r, persistent=False)           # [r, out]
+        self.register_buffer("U", U_r.contiguous(), persistent=False)           # [in, r]
+        self.register_buffer("V", V_r.contiguous(), persistent=False)           # [r, out]
         if bias is not None:
-            self.register_buffer("b", bias.detach().to(dt), persistent=False)  # [out]
+            self.register_buffer("b", bias.detach().to(dt), persistent=False)   # [out]
         else:
             self.b = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: [..., in]
         y = x.matmul(self.U).matmul(self.V)  # [..., out]
         if self.b is not None:
             y = y + self.b
@@ -133,11 +133,9 @@ class ExplicitSVDBlock(nn.Module):
     """
     - Pre-norm residual wiring
     - Attention:
-        * If use_flash_attn==1: rank-space attention via FlashSVD+RoPE kernel.
-        * Else: SVD Q/K/V → reshape → RoPE → PyTorch SDPA.
+        * Uses FlashSVD+RoPE kernel.
     - FFN:
-        * If use_flash_ffn==1: rank-space GEGLU via FlashSVD FFN kernel.
-        * Else: explicit SVD Wi/Wo + GEGLU (your current path).
+        * Uses FlashSVD GEGLU FFN kernel (autotuned by default, optional pinned config).
     - Attention output Wo kept dense (exact HF weight).
     """
     def __init__(
@@ -147,13 +145,15 @@ class ExplicitSVDBlock(nn.Module):
         *,
         rank_attn: Optional[int],
         rank_ffn: Optional[int],
-        use_flash_attn: int = 0,
-        use_flash_ffn: int = 0,
+        use_flash_attn: int = 1,
+        use_flash_ffn: int = 1,
         attn_kernel_bm: int = 64,
         attn_kernel_bn: int = 64,
         attn_kernel_bdh: Optional[int] = None,
         attn_kernel_br: int = 64,
         attn_l2norm_qk: bool = False,  # off by default; parity-first
+        ffn_use_pinned: bool = False,
+        ffn_pinned_cfg: Optional[dict] = None,  # e.g., {'BL':64,'BD':128,'BR1':64,'BR2':128,'num_warps':8,'num_stages':2}
     ):
         super().__init__()
         self.cfg = cfg
@@ -198,6 +198,10 @@ class ExplicitSVDBlock(nn.Module):
             bdh=self.head_dim if attn_kernel_bdh is None else attn_kernel_bdh,
             br=attn_kernel_br,
         )
+
+        # FFN pinned config
+        self.ffn_use_pinned = bool(ffn_use_pinned)
+        self.ffn_pinned_cfg = ffn_pinned_cfg or {}
 
     @staticmethod
     def _padding_mask_bool(attention_mask_2d: torch.Tensor) -> torch.Tensor:
@@ -255,41 +259,56 @@ class ExplicitSVDBlock(nn.Module):
         attn_out = O.transpose(1, 2).reshape(B, M, D).contiguous()
         x = x + self.Wo_attn(attn_out)
 
-        
         # === FFN (pre-norm) ===
         xn2 = self.mlp_norm(x)
         if not self.ffn_is_geglu:
             raise NotImplementedError("Non-GEGLU FFN is not supported in FlashSVD-only script.")
 
         # Dimensions
-        H = self.hidden_size     # model hidden size (output of Wo)
-        D = self.ffn_D           # FFN expansion size (input of Wo)
+        Hdim = self.hidden_size     # model hidden size (output of Wo)
+        Dffn = self.ffn_D           # FFN expansion size (input of Wo)
 
-        # Rank-space inputs and factors
+        # Rank-space factors (ensure memory-friendly layout)
         U1 = self.Wi_exp.U.contiguous()              # [H, R1]
         V1 = self.Wi_exp.V.contiguous()              # [R1, 2D]
         U2 = self.Wo_exp.U.contiguous()              # [D,  R2]
         V2 = self.Wo_exp.V.contiguous()              # [R2, H]
 
         # Biases (fallbacks sized to the *correct* dims)
-        b1 = self.Wi_exp.b if self.Wi_exp.b is not None else xn2.new_zeros(2 * D)
-        b2 = self.Wo_exp.b if self.Wo_exp.b is not None else xn2.new_zeros(H)
+        b1 = (self.Wi_exp.b if self.Wi_exp.b is not None else xn2.new_zeros(2 * Dffn)).contiguous()
+        b2 = (self.Wo_exp.b if self.Wo_exp.b is not None else xn2.new_zeros(Hdim)).contiguous()
 
         # Preflight checks (clear error messages if shapes drift)
-        assert V1.shape[1] == 2 * D, f"V1 must be [R1,2D], got {tuple(V1.shape)}; D={D}"
-        assert U2.shape[0] == D,     f"U2 must be [D,R2], got {tuple(U2.shape)}; D={D}"
-        assert V2.shape[1] == H,     f"V2 must be [R2,H], got {tuple(V2.shape)}; H={H}"
-        assert b1.numel() == 2 * D,  f"b1 must be [2D], got {tuple(b1.shape)}; D={D}"
-        assert b2.numel() == H,      f"b2 must be [H], got {tuple(b2.shape)}; H={H}"
+        assert V1.shape[1] == 2 * Dffn, f"V1 must be [R1,2D], got {tuple(V1.shape)}; D={Dffn}"
+        assert U2.shape[0] == Dffn,     f"U2 must be [D,R2], got {tuple(U2.shape)}; D={Dffn}"
+        assert V2.shape[1] == Hdim,     f"V2 must be [R2,H], got {tuple(V2.shape)}; H={Hdim}"
+        assert b1.numel() == 2 * Dffn,  f"b1 must be [2D], got {tuple(b1.shape)}; D={Dffn}"
+        assert b2.numel() == Hdim,      f"b2 must be [H], got {tuple(b2.shape)}; H={Hdim}"
 
         # Rank-space input: P = X @ U1
         P = xn2.matmul(U1)  # [B, M, R1]
 
-        # FlashSVD GEGLU FFN (tanh/erf picked by gelu_approx)
-        y = flashsvd_ffn_geglu(
-            P, V1, U2, V2, b1, b2,
-            gelu_approx=self.geglu.approximate  # "tanh" or "none" (erf)
-        )
+        # FlashSVD GEGLU FFN (autotuned by default; optionally pinned)
+        approx = self.geglu.approximate  # "tanh" or "none"
+        if self.ffn_use_pinned:
+            assert flashsvd_ffn_geglu_pinned is not None, "Pinned FFN requested but pinned API not found."
+            y = flashsvd_ffn_geglu_pinned(
+                P, V1, U2, V2, b1, b2,
+                BL=self.ffn_pinned_cfg.get('BL', 64),
+                BD=self.ffn_pinned_cfg.get('BD', 128),
+                BR1=self.ffn_pinned_cfg.get('BR1', 64),
+                BR2=self.ffn_pinned_cfg.get('BR2', 128),
+                gelu_approx=approx,
+                store_s_fp32=False,
+                num_warps=self.ffn_pinned_cfg.get('num_warps', 8),
+                num_stages=self.ffn_pinned_cfg.get('num_stages', 2),
+            )
+        else:
+            y = flashsvd_ffn_geglu(
+                P, V1, U2, V2, b1, b2,
+                gelu_approx=approx,
+                store_s_fp32=False,
+            )
         x = x + y
 
         if output_attentions:
@@ -307,13 +326,16 @@ class ModernBERT_SVD_Explicit(nn.Module):
         *,
         rank_attn: Optional[int],
         rank_ffn: Optional[int],
-        use_flash_attn: int = 0,
-        use_flash_ffn: int = 0,
+        use_flash_attn: int = 1,
+        use_flash_ffn: int = 1,
         attn_kernel_bm: int = 64,
         attn_kernel_bn: int = 64,
         attn_kernel_bdh: Optional[int] = None,
         attn_kernel_br: int = 64,
         attn_l2norm_qk: bool = False,
+        # NEW: allow FFN pinned config
+        ffn_use_pinned: bool = False,
+        ffn_pinned_cfg: Optional[dict] = None,
     ):
         super().__init__()
         self.config = hf_model.config
@@ -335,6 +357,8 @@ class ModernBERT_SVD_Explicit(nn.Module):
                     attn_kernel_bdh=attn_kernel_bdh,
                     attn_kernel_br=attn_kernel_br,
                     attn_l2norm_qk=attn_l2norm_qk,
+                    ffn_use_pinned=ffn_use_pinned,
+                    ffn_pinned_cfg=ffn_pinned_cfg,
                 )
             )
         self.model.layers = nn.ModuleList(new_layers)
@@ -362,7 +386,6 @@ class ModernBERT_SVD_Explicit(nn.Module):
         return type("Output", (), {"logits": logits})()
 
 
-
 def _build_loader(tokenizer, seq_len=128, batch_size=8):
     raw = load_dataset("glue", "sst2", split="validation")
     def tok(b): return tokenizer(b["sentence"], padding="max_length", truncation=True, max_length=seq_len)
@@ -373,6 +396,7 @@ def _build_loader(tokenizer, seq_len=128, batch_size=8):
         "attention_mask": torch.stack([x["attention_mask"] for x in b]),
         "labels": torch.tensor([x["label"] for x in b]),
     })
+
 
 @torch.no_grad()
 def quick_check(model_svd, loader, device):
@@ -385,15 +409,13 @@ def quick_check(model_svd, loader, device):
     return metric.compute()["accuracy"]
 
 
-
 @torch.no_grad()
 def acc_peak_time(model_svd, loader, device, use_mask=True):
     metric = load_metric("accuracy")
-    # Record persistent baseline before resetting peak tracking
-    baseline_mib = torch.cuda.memory_allocated() / (1024**2)
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
     torch.cuda.synchronize()
+
     steps = 0
     start = time.perf_counter()
     for batch in loader:
@@ -406,9 +428,9 @@ def acc_peak_time(model_svd, loader, device, use_mask=True):
         steps += 1
     torch.cuda.synchronize()
     elapsed_ms = (time.perf_counter() - start) * 1000.0 / max(1, steps)
-    delta_peak_mib = torch.cuda.max_memory_allocated() / (1024**2)
-    abs_peak_mib = baseline_mib + delta_peak_mib
-    return metric.compute()["accuracy"], delta_peak_mib, abs_peak_mib, elapsed_ms
+
+    peak_mib = torch.cuda.max_memory_allocated() / (1024**2)
+    return metric.compute()["accuracy"], peak_mib, elapsed_ms
 
 
 def main():
@@ -416,24 +438,27 @@ def main():
     print("Device:", device)
 
     # Ranks (None = full rank)
-    RANK_ATTN = 128 #// 4#None
-    RANK_FFN  = 768 #// 4#None
+    RANK_ATTN = 128 // 2
+    RANK_FFN  = 768 // 2
 
-    # # === runtime switches ===
-    # # we are 100% sure the run_modernbert_svd.py code works exactly as the modernbert in full rank 
-    # USE_FLASH_ATTN = 1  # 1: use your FlashSVD RoPE+SDPA kernel; 0: SVD+PyTorch SDPA
-    # USE_FLASH_FFN  = 1  # 1: use your FlashSVD GEGLU FFN kernel;  0: explicit SVD FFN
-    # # (If CUDA unavailable or the kernel modules cannot be imported, these silently fall back to 0.)
-    
     cfg = AutoConfig.from_pretrained(MODEL_DIR, trust_remote_code=True)
-    cfg._attn_implementation = "sdpa"  
+    cfg._attn_implementation = "sdpa"
 
     dense = AutoModelForSequenceClassification.from_pretrained(MODEL_DIR, config=cfg, trust_remote_code=True).to(device).eval()
     tok = AutoTokenizer.from_pretrained(MODEL_DIR, trust_remote_code=True)
-    loader = _build_loader(tok, seq_len=128*4, batch_size=8)
+    loader = _build_loader(tok, seq_len=128*8, batch_size=32)
 
-    # Measure persistent memory for the SVD model construction on GPU
+    # Clean memory and measure baseline (original dense model)
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
     torch.cuda.synchronize()
+
+    CACHED_ORIG_MEM = torch.cuda.max_memory_allocated() / 1024**2
+    print(f"Persistent dense model storage: {CACHED_ORIG_MEM:6.1f} MiB")
+
+    # === Pinned best FFN config from your profile ===
+    PINNED_FFN_CFG = dict(BL=64, BD=128, BR1=64, BR2=128, num_warps=8, num_stages=2)
+    USE_FFN_PINNED = True   # set False to use autotuned FFN
 
     svd = ModernBERT_SVD_Explicit(
         dense,
@@ -441,20 +466,44 @@ def main():
         rank_ffn=RANK_FFN,
         use_flash_attn=1,
         use_flash_ffn=1,
-        attn_kernel_bm=64, attn_kernel_bn=64, attn_kernel_bdh=None, attn_kernel_br=64,
-        attn_l2norm_qk=False,  
+        attn_kernel_bm=64, attn_kernel_bn=64, attn_kernel_bdh=None, attn_kernel_br=32,
+        attn_l2norm_qk=False,
+        ffn_use_pinned=USE_FFN_PINNED,
+        ffn_pinned_cfg=PINNED_FFN_CFG,
     ).to(device).eval()
 
-    # Report persistent model memory before any inference (resident allocations)
-    persistent_mib = torch.cuda.memory_allocated() / (1024**2)
-    print(f"[Model] persistent_mem_before_infer={persistent_mib:.1f} MiB")
+    # Enable performance optimizations
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+
+    # Measure SVD model storage with GPU redundancy (before cleanup)
+    with_act = torch.cuda.max_memory_allocated() / 1024**2
+    print(f"Flash low-rank model storage with GPU Redundancy: {with_act:.1f} MiB")
+
+    # Clean up any construction artifacts and reset for inference measurements
+    import gc
+    gc.collect()
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
+    torch.cuda.synchronize()
+
+    # Measure the clean SVD model storage (persistent baseline for inference)
+    persistent_baseline = torch.cuda.max_memory_allocated() / 1024**2
+    print(f"Persistent low-rank model storage (SVD): {persistent_baseline:.1f} MiB")
+    CACHED_ORIG_MEM = persistent_baseline
 
     acc = quick_check(svd, loader, device)
     print(f"[Sanity] Model accuracy on 3 batches: {acc:.4f}")
 
     # Comprehensive memory and latency measurement (entire validation split)
-    full_acc, delta_peak_mib, abs_peak_mib, latency_ms = acc_peak_time(svd, loader, device, use_mask=True)
-    print(f"[Eval] acc={full_acc:.4f}  delta_peak={delta_peak_mib:.1f} MiB  abs_peak={abs_peak_mib:.1f} MiB  avg_latency={latency_ms:.2f} ms/batch")
+    full_acc, peak_lr, latency_ms = acc_peak_time(svd, loader, device, use_mask=True)
+
+    # Calculate real peak memory using the same formula as BERT profile
+    real_peak_mib = peak_lr - with_act + CACHED_ORIG_MEM
+    transient_mib = peak_lr - CACHED_ORIG_MEM
+
+    print(f"FlashSVD     | acc={full_acc:.4f} | peak ={peak_lr:6.1f} MiB | real peak ={real_peak_mib:6.1f} MiB | Transient={transient_mib:6.1f} MiB | {latency_ms:6.1f} ms/b")
+
 
 if __name__ == "__main__":
     main()

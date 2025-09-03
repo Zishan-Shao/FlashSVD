@@ -2,6 +2,7 @@
 import os
 import copy
 from typing import Optional
+import time
 
 import torch
 import torch.nn as nn
@@ -11,6 +12,9 @@ from datasets import load_dataset
 from torch.utils.data import DataLoader
 from transformers import AutoConfig, AutoTokenizer, AutoModelForSequenceClassification
 from evaluate import load as load_metric
+
+# Import FlashAttention
+from flash_attn_triton import flash_attn_triton_flex
 
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
@@ -133,6 +137,10 @@ class ExplicitSVDBlock(nn.Module):
         self.num_heads = cfg.num_attention_heads
         self.head_dim = self.hidden_size // self.num_heads
 
+        # Validate head dimension is power of 2 for Triton FlashAttention
+        if not (self.head_dim > 0 and (self.head_dim & (self.head_dim - 1)) == 0):
+            raise ValueError(f"Head dimension {self.head_dim} must be a power of 2 for FlashAttention Triton kernel")
+
         # Norms
         self.attn_norm = copy.deepcopy(hf_layer.attn_norm)
         self.mlp_norm  = copy.deepcopy(hf_layer.mlp_norm)
@@ -196,24 +204,48 @@ class ExplicitSVDBlock(nn.Module):
         q = qf.view(B, H, M, dh)
         k = kf.view(B, H, M, dh)
 
-        # ---- SDPA mask ----
-        sdpa_mask = None
+        # ---- FlashAttention with BMHd layout ----
+        # Convert from BHMD to BMHd layout for FlashAttention
+        q_bmhd = q.transpose(1, 2).contiguous()  # [B,M,H,dh]
+        k_bmhd = k.transpose(1, 2).contiguous()  # [B,M,H,dh]
+        v_bmhd = v.transpose(1, 2).contiguous()  # [B,M,H,dh]
+        
+        # Convert mask to FlashAttention format [B,H,1,M] int32 (1 = keep, 0 = mask)
+        # Priority: sliding_window_mask > attention_mask > default (all ones)
         if sliding_window_mask is not None:
+            # Sliding window mask is 4D additive [B,1/H,M,M] or similar
+            # For FlashAttention, we need to extract the key mask [B,H,1,M]
             sm = sliding_window_mask
-            if sm.dtype.is_floating_point and sm.dtype != q.dtype:
-                sm = sm.to(q.dtype)
-            sdpa_mask = sm  # additive 4D [B,1/H,M,M]
+            if sm.dim() == 4 and sm.shape[2] == M and sm.shape[3] == M:
+                # Extract diagonal or first row as key mask approximation
+                # This is a simplification - ideally we'd implement causal masking in the kernel
+                mask_bh1m = (sm[..., 0:1, :] >= 0).to(torch.int32)  # [B,H,1,M]
+                if mask_bh1m.shape[1] == 1:  # Broadcast over heads if needed
+                    mask_bh1m = mask_bh1m.expand(B, H, 1, M)
+                mask_bh1m = mask_bh1m.contiguous()
+            else:
+                # Fallback to default mask
+                mask_bh1m = torch.ones(B, H, 1, M, device=q.device, dtype=torch.int32)
         elif attention_mask is not None:
             if attention_mask.dim() == 2:
-                sdpa_mask = self._padding_mask_bool(attention_mask)  # boolean [B,1,1,M]
-            elif attention_mask.dim() == 4:
-                sm = attention_mask
-                if sm.dtype.is_floating_point and sm.dtype != q.dtype:
-                    sm = sm.to(q.dtype)
-                sdpa_mask = sm
+                # [B,M] padding mask -> [B,H,1,M] int32 (1 = keep, 0 = mask)
+                mask_bh1m = attention_mask.to(torch.int32)[:, None, None, :].expand(B, H, 1, M).contiguous()
+            else:
+                # Assume 4D mask, convert to int32
+                mask_bh1m = (attention_mask >= 0).to(torch.int32)
+                if mask_bh1m.shape[2] != 1:
+                    mask_bh1m = mask_bh1m[:, :, :1, :]
+                mask_bh1m = mask_bh1m.contiguous()
+        else:
+            mask_bh1m = torch.ones(B, H, 1, M, device=q.device, dtype=torch.int32)
 
-        # SDPA on [B,H,M,dh]
-        attn = F.scaled_dot_product_attention(q, k, v, attn_mask=sdpa_mask, dropout_p=0.0)  # [B,H,M,dh]
+        # FlashAttention Triton kernel
+        attn = flash_attn_triton_flex(
+            q_bmhd, k_bmhd, v_bmhd, mask_bh1m,
+            layout="BMHd", 
+            use_autotune=True
+        )  # Returns [B,H,M,dh]
+        
         attn = attn.transpose(1, 2).reshape(B, M, D)  # [B,M,D]
         x = x + self.Wo_attn(attn)
 
@@ -303,26 +335,88 @@ def quick_check(model_svd, loader, device):
         metric.add_batch(predictions=out.logits.argmax(-1).cpu(), references=batch["labels"].cpu())
     return metric.compute()["accuracy"]
 
+
+@torch.no_grad()
+def acc_peak_time(model_svd, loader, device, use_mask=True):
+    metric = load_metric("accuracy")
+    # Clean memory and reset peak tracking for accurate measurement
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
+    torch.cuda.synchronize()
+    
+    steps = 0
+    start = time.perf_counter()
+    for batch in loader:
+        batch = {k: v.to(device) for k, v in batch.items()}
+        if use_mask:
+            out = model_svd(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"]).logits
+        else:
+            out = model_svd(input_ids=batch["input_ids"]).logits
+        metric.add_batch(predictions=out.argmax(-1).cpu(), references=batch["labels"].cpu())
+        steps += 1
+    torch.cuda.synchronize()
+    elapsed_ms = (time.perf_counter() - start) * 1000.0 / max(1, steps)
+    
+    # Peak memory during inference
+    peak_mib = torch.cuda.max_memory_allocated() / (1024**2)
+    
+    return metric.compute()["accuracy"], peak_mib, elapsed_ms
+
 def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print("Device:", device)
 
-    # Full rank by default — set smaller ints later to compress
-    RANK_ATTN = None
-    RANK_FFN  = None
+    # Ranks for compression testing
+    RANK_ATTN = 128 // 2
+    RANK_FFN  = 768 // 2
 
     cfg = AutoConfig.from_pretrained(MODE_DIR := MODEL_DIR, trust_remote_code=True)
     cfg._attn_implementation = "sdpa"  # matches our explicit attention path
 
     dense = AutoModelForSequenceClassification.from_pretrained(MODE_DIR, config=cfg, trust_remote_code=True).to(device).eval()
     tok = AutoTokenizer.from_pretrained(MODE_DIR, trust_remote_code=True)
-    loader = _build_loader(tok, seq_len=128, batch_size=8)
+    loader = _build_loader(tok, seq_len=128*4, batch_size=64)
+
+    # Clean memory and measure baseline (original dense model)
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
+    torch.cuda.synchronize()
+    
+    # Measure baseline dense model memory
+    CACHED_ORIG_MEM = torch.cuda.max_memory_allocated() / 1024**2
+    print(f"Persistent dense model storage: {CACHED_ORIG_MEM:6.1f} MiB")
 
     svd = ModernBERT_SVD_Explicit(dense, rank_attn=RANK_ATTN, rank_ffn=RANK_FFN).to(device).eval()
 
+    # Measure SVD model storage with GPU redundancy (before cleanup)
+    with_act = torch.cuda.max_memory_allocated() / 1024**2
+    print(f"Flash low-rank model storage with GPU Redundancy: {with_act:.1f} MiB")
+    
+    # Clean up any construction artifacts and reset for inference measurements
+    import gc
+    gc.collect()
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
+    torch.cuda.synchronize()
+    
+    # Measure the clean SVD model storage (persistent baseline for inference)
+    persistent_baseline = torch.cuda.max_memory_allocated() / 1024**2
+    print(f"Persistent low-rank model storage (SVD): {persistent_baseline:.1f} MiB")
+    
+    # Update CACHED_ORIG_MEM to use the clean SVD baseline (like in BERT profile)
+    CACHED_ORIG_MEM = persistent_baseline
+
     acc = quick_check(svd, loader, device)
     print(f"[Sanity] SVD-explicit model accuracy on 3 batches: {acc:.4f}")
-    print("If parity looks good, lower RANK_ATTN / RANK_FFN to compress.")
+    
+    # Comprehensive memory and latency measurement (entire validation split)
+    full_acc, peak_lr, latency_ms = acc_peak_time(svd, loader, device, use_mask=True)
+    
+    # Calculate real peak memory using the same formula as BERT profile  
+    real_peak_mib = peak_lr - with_act + CACHED_ORIG_MEM
+    transient_mib = peak_lr - CACHED_ORIG_MEM
+    
+    print(f"LowRank SVD  | acc={full_acc:.4f} | peak ={peak_lr:6.1f} MiB | real peak ={real_peak_mib:6.1f} MiB | Transient={transient_mib:6.1f} MiB | {latency_ms:6.1f} ms/b")
 
 if __name__ == "__main__":
     main()
