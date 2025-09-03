@@ -1,4 +1,4 @@
-# profile_flashfwsvd.py
+# profile_svd_roberta.py
 
 import os
 import sys
@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 from datasets import load_dataset
 from torch.utils.data import DataLoader
-from transformers import BertForSequenceClassification, AutoTokenizer, AutoConfig
+from transformers import RobertaForSequenceClassification, AutoTokenizer, AutoConfig
 from evaluate import load as load_metric
 from typing import Callable, Tuple
 import math
@@ -16,40 +16,41 @@ import torch.nn.functional as F
 
 import functools
 from torch.profiler import profile, ProfilerActivity
-import pandas as pd
 torch.manual_seed(114514)
 
-
-# we need to access this directory first
 THIS_FILE = os.path.abspath(__file__)
 REPO_ROOT = os.path.dirname(os.path.dirname(THIS_FILE))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
-task_name = "stsb"
 print(REPO_ROOT)
-MODEL_DIR = os.path.join(REPO_ROOT, "models/BERT", f"bert-base-uncased-{task_name}")
+task_name = "mnli"
+MODEL_DIR = os.path.join(REPO_ROOT, "models/RoBERTa", f"roberta-base-{task_name}")
+
 from src.utils.metrics import acc_peak_time, compute_persistent_memory, summarize_dense_vs_lowrank
 from src.kernels.flash_attn_triton import flash_attn_triton
-from src.kernels.flashsvdattn import flash_svd_attention
-from src.kernels.flashsvdffnv2 import flashsvd_ffn
-from src.kernels.flashsvdffnv1 import flashsvd_ffn_v1
-from src.utils.svd_helpers import build_fwsvd_helpers
-from src.utils.svd_helpers import BertFWLayerShim as LayerShim
-from src.utils.FlashSVDBlocks import BertFlashFWSVDBlock as FlashFWSVDBlock
+from src.utils.svd_helpers import build_plain_svd_helpers
+from src.utils.svd_helpers import BertLayerShim as LayerShim
+from src.utils.SVDBlocks import RobertaSVDBlock as SVDBlock
 
 
 
 if __name__ == "__main__":
-        
+    
+    # (60, 480, 480),   # 10%
+    # (56, 384, 384),   # Conservative % 25% reduction
+    # (48, 336, 336),   # 35%
+    # (48, 288, 288),   # Conservative % 
+    # (40, 240, 240),   # Conservative % 50% reduction
+    # (32, 192, 192),   # Conservative % 60%
+    
     BATCH_SIZE = 64
     SEQ_LEN    = 128
     device     = "cuda"
-    RANK_ATTN  = 40 # 
-    RANK_FF    = 240 #  
-    RANK_WO    = 240 #  
+    RANK_ATTN  = 40 #56 #
+    RANK_FF    = 240 #384 #
+    RANK_WO    = 240 #384 # 
     
-
-    # ─── 3) Load & tokenize GLUE ──────────────────────────────────────────────
+    
     if task_name == "mnli":
         val_split = "validation_matched"
     else:
@@ -57,7 +58,6 @@ if __name__ == "__main__":
     raw = load_dataset("glue", task_name, split=val_split)
     tokz = AutoTokenizer.from_pretrained(MODEL_DIR)
 
-    # Which GLUE tasks take one sentence vs. two?
     single_sent_tasks = {"cola", "sst2"}
     pair_sent_tasks   = {"qqp", "mnli", "qnli", "stsb", "rte", "mrpc"}
     # map each pair task to its two fields
@@ -90,7 +90,6 @@ if __name__ == "__main__":
                 max_length=SEQ_LEN,
             )
 
-    # drop _all_ original columns except `label`
     remove_cols = [c for c in raw.column_names if c != "label"]
     ds = raw.map(
         tokenize_fn,
@@ -108,7 +107,6 @@ if __name__ == "__main__":
             "labels":         torch.tensor([x["label"]         for x in b]),
         },
     )
-
     print(f"BATCH_SIZE: {BATCH_SIZE} SEQ_LEN: {SEQ_LEN}  RANK_ATTN: {RANK_ATTN}  RANK_FF: {RANK_FF}  RANK_WO: {RANK_WO}")
 
     if task_name == "stsb":
@@ -128,45 +126,32 @@ if __name__ == "__main__":
         num_labels   = 2
         problem_type = None
 
-    # build a config that matches the checkpoint
     cfg = AutoConfig.from_pretrained(
         MODEL_DIR,
         num_labels=num_labels,
         problem_type=problem_type,
     )
-    # now load with that config
-    model = BertForSequenceClassification.from_pretrained(
+    model = RobertaForSequenceClassification.from_pretrained(
         MODEL_DIR,
         config=cfg,
     )
     model = model.to(device).eval()
     
-    # ——— 3) Persistent & low-rank memory ———
-    CACHED_ORIG_MEM = torch.cuda.memory_allocated()/1024**2#torch.cuda.max_memory_reserved()/1024**2#compute_persistent_memory(model)
+    CACHED_ORIG_MEM = torch.cuda.max_memory_allocated()/1024**2
     print(f"Persistent model storage: {CACHED_ORIG_MEM:6.1f} MiB")
 
-    # --------------------------- 5. build FW-SVD helpers -------------------------
-    fwsvd_per_head, fwsvd_low_rank = build_fwsvd_helpers(
-        model, loader, device=device
-    )
+    svd_per_head, svd_low_rank = build_plain_svd_helpers(model)
+
+    for i, layer in enumerate(model.roberta.encoder.layer):
+        blk = SVDBlock(layer, RANK_ATTN, RANK_FF, svd_per_head, svd_low_rank, RANK_WO)
+        model.roberta.encoder.layer[i] = LayerShim(blk).to(device).eval().float()
     
-    for i, hf_layer in enumerate(model.bert.encoder.layer):     
-        block = FlashFWSVDBlock(
-            hf_layer,
-            rank_attn   = RANK_ATTN,
-            rank_ff     = RANK_FF,
-            fwsvd_per_head = fwsvd_per_head,
-            fwsvd_low_rank = fwsvd_low_rank,
-            rank_wo     = RANK_WO
-        )
-        model.bert.encoder.layer[i] = LayerShim(block).to(device).eval().float()
-    
-    del hf_layer, block, fwsvd_per_head, fwsvd_low_rank
-    for layer in model.bert.encoder.layer:
-        if hasattr(layer, 'fwsvd_per_head'):
-            del layer.fwsvd_per_head
-        if hasattr(layer, 'fwsvd_low_rank'):
-            del layer.fwsvd_low_rank
+    del layer, blk, svd_per_head, svd_low_rank
+    for layer in model.roberta.encoder.layer:
+        if hasattr(layer, 'svd_per_head'):
+            del layer.svd_per_head
+        if hasattr(layer, 'svd_low_rank'):
+            del layer.svd_low_rank
 
     baseline = summarize_dense_vs_lowrank(model) / 1024**2
 
@@ -176,18 +161,17 @@ if __name__ == "__main__":
     torch.cuda.reset_peak_memory_stats()
     torch.cuda.synchronize()
 
-    # we use the profile_flashfwsvd_offload to validate the result of above, which turn out to be accurate. 
     with_act = torch.cuda.max_memory_allocated() / 1024**2
     print(f"low-rank model storage with GPU Redundancy: {with_act:.1f} MiB")
-            
+
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
     torch.cuda.synchronize()
     
-    CACHED_ORIG_MEM = baseline#torch.cuda.max_memory_allocated()/1024**2#compute_persistent_memory(model)
-    print(f"Persistent low-rank model storage (FWSVD): {CACHED_ORIG_MEM:6.1f} MiB")
+    metric_name = "pearson" if task_name == "stsb" else "acc"
+    
+    CACHED_ORIG_MEM = baseline
+    print(f"Persistent low-rank model storage (SVD): {CACHED_ORIG_MEM:6.1f} MiB")
 
     acc, peak_lr, t = acc_peak_time(model, loader, metric, task_name, device, use_mask=True) 
-    print(f"FlashSVD     | acc={acc:.4f} | peak ={(peak_lr-with_act+CACHED_ORIG_MEM):6.1f} MiB | Transient={(peak_lr-with_act):6.1f} MiB | {t:6.1f} ms/b")
-
-
+    print(f"RoBERTa LowRank SVD     | {metric_name}={acc:.4f} | peak ={(peak_lr):6.1f} MiB | real peak ={(peak_lr-with_act + CACHED_ORIG_MEM):6.1f} MiB | Transient={(peak_lr-with_act):6.1f} MiB | {t:6.1f} ms/b")

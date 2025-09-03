@@ -1,28 +1,21 @@
-# bert.py should load the pre-computed low-rank factors for computation
+# roberta_profile_dense_full.py should load the pre-computed low-rank factors for computation
 #         it should not redo the SVD, but load it directly
 
 # Update 6.26.2025: We have added the FWSVD along with vanilla SVD here for computation
 # Issue: we should expect the activation memory of the dense be smaller than the memory of the flashsvd
 #        but in here we see the activation of flashsvd be slightly larger --> 311 v.s. 274
-
-# NOTE: this is just identical as the profile_dense.py in BERT case
-
 import os
 import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
-from transformers import BertModel
-from transformers import BertForSequenceClassification, AutoConfig, AutoTokenizer
+from transformers import RobertaModel
 
 import time
 import pandas as pd
-from torch.utils.data import DataLoader
-from datasets import load_dataset
-from transformers import BertForSequenceClassification, 
-from evaluate import load as load_metric
-import itertools
+
+from transformers import RobertaForSequenceClassification, AutoConfig
 from typing import Callable
 torch.manual_seed(114514)
 
@@ -31,19 +24,25 @@ THIS_FILE = os.path.abspath(__file__)
 REPO_ROOT = os.path.dirname(os.path.dirname(THIS_FILE))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
-task_name = "stsb"
 print(REPO_ROOT)
-MODEL_DIR = os.path.join(REPO_ROOT, "models/BERT", f"bert-base-uncased-{task_name}")
+task_name = "mnli"
+MODEL_DIR = os.path.join(REPO_ROOT, "models/RoBERTa", f"roberta-base-{task_name}")
+
 from src.utils.metrics import acc_peak_time, compute_persistent_memory
 
 
 
 if __name__ == "__main__":
+    import os, time, math, torch, pandas as pd
+    from torch.utils.data import DataLoader
+    from datasets import load_dataset
+    from transformers import RobertaForSequenceClassification, AutoTokenizer
+    from evaluate import load as load_metric
+    import itertools
     
-    BATCH_SIZE = 8*4
-    SEQ_LEN    = 128*2
-    device     = "cuda"
-    
+    BATCH_SIZE = 8*8
+    SEQ_LEN    = 128*4
+    device     = "cuda"    
     
     if task_name == "mnli":
         val_split = "validation_matched"
@@ -52,8 +51,10 @@ if __name__ == "__main__":
     raw = load_dataset("glue", task_name, split=val_split)
     tokz = AutoTokenizer.from_pretrained(MODEL_DIR)
 
+    # Which GLUE tasks take one sentence vs. two?
     single_sent_tasks = {"cola", "sst2"}
     pair_sent_tasks   = {"qqp", "mnli", "qnli", "stsb", "rte", "mrpc"}
+    # map each pair task to its two fields
     field_map = {
       "qqp":  ("question1",   "question2"),
       "mnli": ("premise",     "hypothesis"),
@@ -104,14 +105,12 @@ if __name__ == "__main__":
 
     print(f"BATCH_SIZE: {BATCH_SIZE}  SEQ_LEN: {SEQ_LEN}")
     
-    # 3) Load & prep model in FP32
-    # Choose the right metric for the task
+    # Load & prep model in FP32
     if task_name == "stsb":
         metric = load_metric("pearsonr")
     else:
         metric = load_metric("accuracy")
     
-    #model = BertForSequenceClassification.from_pretrained(MODEL_DIR, num_labels=2)
     # pick the right # of labels (and problem_type for STS-B)
     if task_name == "mnli":
         num_labels = 3
@@ -131,22 +130,19 @@ if __name__ == "__main__":
         num_labels=num_labels,
         problem_type=problem_type,
     )
-    # now load with that config
-    model = BertForSequenceClassification.from_pretrained(
+    model = RobertaForSequenceClassification.from_pretrained(        
         MODEL_DIR,
         config=cfg,
     )
     model = model.to(device).eval()
     
     CACHED_ORIG_MEM = compute_persistent_memory(model)
-    print(f"Low-rank factors absolute storage: {CACHED_ORIG_MEM:6.1f} MiB")
+    print(f"Dense factors absolute storage: {CACHED_ORIG_MEM:6.1f} MiB")
 
-    # ─── 7. Dense baseline ─────────────────────────────────────────────────────
     metric_name = "pearson" if task_name == "stsb" else "acc"
     
     acc, peak_m, t = acc_peak_time(model, loader, metric, task_name, device, use_mask=True) 
-    print(f"Dense   w/ mask   | {metric_name}={acc:.4f} | peak={peak_m:6.1f} MiB | transient={peak_m - CACHED_ORIG_MEM:6.1f} MiB | {t:6.1f} ms/b")
-    acc, peak_nm, t = acc_peak_time(model, loader, metric, task_name, device, use_mask=False)
-    print(f"Dense   w/o mask  | {metric_name}={acc:.4f} | peak={peak_nm:6.1f} MiB | transient={peak_m - CACHED_ORIG_MEM:6.1f} MiB | {t:6.1f} ms/b")
-    BASE_PEAK = max(peak_m, peak_nm)
-
+    print(f"RoBERTa Dense   w/ mask   | {metric_name}={acc:.4f} | peak={peak_m:6.1f} MiB | transient={peak_m - CACHED_ORIG_MEM:6.1f} MiB | {t:6.1f} ms/b")
+    acc, peak_nm, t = acc_peak_time(model, loader, metric, task_name, device, use_mask=True) 
+    print(f"RoBERTa Dense   w/o mask  | {metric_name}={acc:.4f} | peak={peak_nm:6.1f} MiB | transient={peak_m - CACHED_ORIG_MEM:6.1f} MiB | {t:6.1f} ms/b")
+    BASE_PEAK = max(peak_m, peak_nm) 

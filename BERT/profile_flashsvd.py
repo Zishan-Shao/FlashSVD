@@ -28,13 +28,12 @@ task_name = "stsb"
 print(REPO_ROOT)
 MODEL_DIR = os.path.join(REPO_ROOT, "models/BERT", f"bert-base-uncased-{task_name}")
 from src.utils.metrics import acc_peak_time, compute_persistent_memory, summarize_dense_vs_lowrank
-from src.kernels.flash_attn_triton import flash_attn_triton
 from src.kernels.flashsvdattn import flash_svd_attention
 from src.kernels.flashsvdffnv2 import flashsvd_ffn
 from src.kernels.flashsvdffnv1 import flashsvd_ffn_v1
 from src.utils.svd_helpers import build_plain_svd_helpers
 from src.utils.FlashSVDBlocks import BertFlashSVDBlock as FlashSVDBlock
-from src.utils.svd_helpers import BERTLayerShim as LayerShim
+from src.utils.svd_helpers import BertLayerShim as LayerShim
 
 
 

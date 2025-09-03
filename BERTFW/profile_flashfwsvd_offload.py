@@ -20,7 +20,7 @@ import functools
 from torch.profiler import profile, ProfilerActivity
 import pandas as pd
 import gc
-
+torch.manual_seed(114514)
 
 
 # we need to access this directory first

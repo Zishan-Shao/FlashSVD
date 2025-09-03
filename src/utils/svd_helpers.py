@@ -54,6 +54,18 @@ class BertLayerShim(nn.Module):
 
 
 
+# # ─── Roberta LayerShim ────────────────────────────────────────────────────────────
+# class LayerShim(nn.Module):
+#     def __init__(self, block: nn.Module):
+#         super().__init__()
+#         self.block = block
+
+#     def forward(self, hidden_states, attention_mask=None, *args, **kwargs):
+#         raw_mask = attention_mask
+#         if attention_mask is not None and attention_mask.dim() == 4:
+#             raw_mask = (attention_mask[:,0,0,:] == 0)
+#         return (self.block(hidden_states, raw_mask),)
+
 
 
 ############################ FWSVD Helpers Here ############################

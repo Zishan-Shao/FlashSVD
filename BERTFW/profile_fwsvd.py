@@ -15,7 +15,9 @@ import torch.nn.functional as F
 
 import functools
 import math, time, torch, pandas as pd    
-    
+from torch.profiler import profile, ProfilerActivity
+torch.manual_seed(114514)
+
 
 # we need to access this directory first
 THIS_FILE = os.path.abspath(__file__)
@@ -30,9 +32,6 @@ from src.kernels.flash_attn_triton import flash_attn_triton
 from src.utils.svd_helpers import build_fwsvd_helpers
 from src.utils.svd_helpers import BertFWLayerShim as LayerShim
 from src.utils.SVDBlocks import BertFWSVDBlock as FWSVDBlock
-
-
-torch.manual_seed(114514)
 
 
 
