@@ -1,213 +1,133 @@
-# profile_flashsvd_full.py
+# profile_svd_full.py  — DRONE-style data-aware low-rank (one-shot)
+# -------------------------------------------------------------------------------
+# How it works (high level):
+# 1) Calibration (few batches): grab per-layer input covariances C = E[x x^T]
+#    for (a) inputs to Q/K/VM (dm x dm), (b) inputs to attn.output.dense (dm x dm),
+#    (c) inputs to FFN intermediate.dense (dm x dm), (d) inputs to FFN output.dense (d_ff x d_ff).
+# 2) DRONE factorization for each Linear W with input covariance C:
+#       S = chol(C),  A = W^T S,  SVD(A) = U Σ V^T (truncate to rank k)
+#       U_data = S^{-T} V_k Σ_k^{1/2}   (shape: d_in x k)
+#       V_data = Σ_k^{1/2} U_k^T        (shape: k x d_out)
+#    This minimizes ||X^T(W - U_data V_data)||_F for the empirical inputs X.
+# 3) Attention path stays Flash: we pass P=U_data (per-head), V=V_data, and bias to flash_svd_attention.
+# 4) FFN stays Flash too: mid = x @ U1; then flashsvd_ffn_v1(mid, V1, U2, V2, b1, b2).
+# -------------------------------------------------------------------------------
 
 import os
 import sys
 import time
 import itertools
+import math
+from typing import Dict, List
+
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from datasets import load_dataset
 from torch.utils.data import DataLoader
 from transformers import BertForSequenceClassification, AutoTokenizer, AutoConfig
 from evaluate import load as load_metric
-from typing import Callable, Tuple
-import math
-import torch.nn.functional as F
+
 from flash_attn_triton import flash_attn_triton
-
-
-import functools
-import torch
-
-
 
 # ─── locate repo & model ─────────────────────────────────────────────────────
 THIS_FILE = os.path.abspath(__file__)
 REPO_ROOT = os.path.dirname(os.path.dirname(THIS_FILE))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
-task_name = "stsb" 
+
+task_name = "sst2"
 MODEL_DIR = os.path.join(REPO_ROOT, "models/BERT", f"bert-base-uncased-{task_name}")
 
-# ─── 0) Helpers for SVD decomposition ─────────────────────────────────────────
-def build_plain_svd_helpers(model):
-    def svd_per_head(Wt: torch.Tensor, rank: int):
-        d_model, _ = Wt.shape
-        H          = model.config.num_attention_heads
-        dh         = d_model // H
-        Wt3        = Wt.view(d_model, H, dh)
-        Us, Vs     = [], []
-        for h in range(H):
-            Wh = Wt3[:, h, :].float()  # to float32 for SVD
-            U32, S32, Vh32 = torch.linalg.svd(Wh, full_matrices=False)
-            U = (U32[:, :rank] * S32[:rank]).to(Wt.dtype)
-            V = Vh32[:rank, :].to(Wt.dtype)
-            Us.append(U)
-            Vs.append(V)
-        return torch.stack(Us, 0), torch.stack(Vs, 0)
-
-    def svd_low_rank(W: torch.Tensor, rank: int):
-        Wf = W.float()
-        U32, S32, Vh32 = torch.linalg.svd(Wf, full_matrices=False)
-        U = (U32[:, :rank] * S32[:rank]).to(W.dtype)
-        V = Vh32[:rank, :].to(W.dtype)
-        return U, V
-
-    return svd_per_head, svd_low_rank
-
-
-# ─── 0b) DRONE (data-aware) low-rank decomposition ────────────────────────────
-def _truncated_svd(M: torch.Tensor, k: int):
-    # torch.linalg.svd returns U,S,Vh with Vh is V^T
-    U, S, Vh = torch.linalg.svd(M, full_matrices=False)
-    k_eff = min(k, U.shape[1], Vh.shape[0])
-    return U[:, :k_eff], S[:k_eff], Vh[:k_eff, :]
-
-def drone_low_rank(W: torch.Tensor, X: torch.Tensor, rank: int, eps: float = 1e-6):
+# -----------------------------------------------------------------------------
+# Numeric helpers
+# -----------------------------------------------------------------------------
+def _safe_cholesky(C: torch.Tensor, max_tries: int = 5, base_eps: float = 1e-6):
     """
-    DRONE factorization for y = W x with calibration inputs X.
-    Runs the SVDs on CPU to match X (your calibration stores X on CPU).
-    Returns CPU tensors; the module .to(device) call will move them later.
+    Robust Cholesky: if C is near-singular (few calibration samples), add jitter.
+    Returns lower-triangular S with C + eps*I = S S^T.
     """
-    # --- do all linear algebra on CPU (prevents CUDA/CPU mismatch & saves VRAM)
-    Wf = W.to(torch.device('cpu'), dtype=torch.float32)
-    Xf = X.to(torch.device('cpu'), dtype=torch.float32)
+    D = C.shape[-1]
+    eps = base_eps * float(C.diag().mean().item() + 1.0)
+    I = torch.eye(D, dtype=C.dtype, device=C.device)
+    for _ in range(max_tries):
+        try:
+            return torch.linalg.cholesky(C + eps * I)
+        except RuntimeError:
+            eps *= 10.0
+    # last resort: add bigger ridge
+    return torch.linalg.cholesky(C + (1e-2 * float(C.diag().mean().item() + 1.0)) * I)
 
-    # SVDs with numerical rank detection
-    Uw, Sw, Vhw = torch.linalg.svd(Wf, full_matrices=False)   # W = Uw diag(Sw) Vw^T
-    r = int((Sw > eps).sum().item())
-    if r == 0:
-        # degenerate: fall back to a tiny rank-1 to avoid crashes
-        r = 1
-    Uw_r = Uw[:, :r]
-    Sw_r = Sw[:r]
-    Vw_r = Vhw[:r, :].T
-
-    Ux, Sx, Vhx = torch.linalg.svd(Xf, full_matrices=False)   # X = Ux diag(Sx) Vx^T
-    t = int((Sx > eps).sum().item())
-    if t == 0:
-        t = 1
-    Ux_t = Ux[:, :t]
-    Sx_t = Sx[:t].clamp_min(eps)
-
-    # Z = S_Wr * (V_Wr^T U_Xt) * S_Xt  (shape r x t)
-    Z = (Vw_r.T @ Ux_t)                      # r x t (now both on CPU)
-    Z = Z * Sw_r.unsqueeze(1)                # row-scale by S_Wr
-    Z = Z * Sx_t.unsqueeze(0)                # col-scale by S_Xt
-
-    Uz, Sz, Vhz = torch.linalg.svd(Z, full_matrices=False)
-    k_eff = min(rank, Uz.shape[1], Vhz.shape[0])
-    if k_eff == 0:
-        k_eff = 1
-    Uz_k = Uz[:, :k_eff]                     # r x k
-    Vz_k = Vhz[:k_eff, :].T                  # t x k
-
-    # U* = U_Wr * U_zk      (d_out x k)
-    U_star = Uw_r @ Uz_k
-
-    # V* = U_Xt * (S_Xt^{-1} V_zk)   (d_in x k)
-    V_scaled = Vz_k * (1.0 / Sx_t).unsqueeze(1)
-    V_star   = Ux_t @ V_scaled
-
-    # Keep on CPU for now; caller/module .to(device) will move later.
-    P = V_star.to(dtype=W.dtype)             # (d_in, k)
-    V = U_star.T.to(dtype=W.dtype)           # (k, d_out)
-    return P, V
-
-def drone_per_head(Wt_head: torch.Tensor, X_in: torch.Tensor, rank: int):
+def _data_aware_low_rank(W_in_out: torch.Tensor, rank: int, cov_in: torch.Tensor):
     """
-    DRONE per head, matching your existing 'svd_per_head' API.
-    Wt_head : (d_model, dh)  == W^T for this head
-    X_in    : (d_model, n_samples)
+    DRONE-style factorization for a general Linear with weight shaped as we use it
+    in this file: W has shape [d_in, d_out] (note: we pass .t() for some modules).
+    Returns U:[d_in,k], V:[k,d_out] so that W' ≈ U @ V minimizing ||X^T(W-W')||_F.
+
+    Steps: S = chol(C), A = (W^T) @ S;  A = U Σ V^T;  Udata = S^{-T} V Σ^{1/2},  Vdata = Σ^{1/2} U^T
+    """
+    d_in, d_out = W_in_out.shape
+    if rank <= 0:
+        raise ValueError("rank must be positive")
+
+    # float32 for numerical stability
+    Wf = W_in_out.float()
+    Cf = cov_in.float()
+
+    # Cholesky of input covariance C = S S^T
+    S = _safe_cholesky(Cf)  # [d_in, d_in], lower
+
+    # A = (W^T) @ S  -> [d_out, d_in]
+    A = Wf.t().contiguous() @ S
+
+    # SVD(A) = U [d_out,k] , s [k] , V [d_in,k]
+    U, s, Vh = torch.linalg.svd(A, full_matrices=False)
+    V = Vh.t()
+
+    k = min(rank, s.numel())
+    U_k = U[:, :k]          # [d_out,k]
+    s_k = s[:k]             # [k]
+    V_k = V[:, :k]          # [d_in,k]
+
+    # Compute S^{-T} V_k  by solving  S^T X = V_k
+    X = torch.linalg.solve_triangular(S.t(), V_k, upper=True)  # [d_in,k]
+    sqrt_s = torch.sqrt(torch.clamp(s_k, min=0))
+    # U_data = (S^{-T} V_k) * sqrt(s)  (columnwise scaling)
+    U_data = X * sqrt_s.unsqueeze(0)          # [d_in,k]
+    # V_data = sqrt(s) * U_k^T
+    V_data = (sqrt_s.unsqueeze(1) * U_k.t())  # [k,d_out]
+
+    return U_data.to(W_in_out.dtype), V_data.to(W_in_out.dtype)
+
+def _data_aware_per_head(Wt_dm_dh: torch.Tensor, rank: int, cov_in: torch.Tensor, num_heads: int):
+    """
+    DRONE-style factorization per-head for attention Q/K/V.
+    Input:
+      - Wt_dm_dh: weight^T with shape [d_model, d_head * H] but we reshape per-head
+                  (we pass per-head as [d_model, dh] same as the original code did)
+      - rank: target rank per head
+      - cov_in: input covariance for this linear's input space (d_model x d_model)
+      - num_heads: H
     Returns:
-      P : (d_model, rank)
-      V : (rank, dh)
+      stacked U:[H, d_model, rank], V:[H, rank, dh]
     """
-    # Our helper expects W (d_out, d_in), so give W = Wt^T
-    W = Wt_head.T.contiguous()  # (dh, d_model)
-    P, V = drone_low_rank(W, X_in, rank)
-    return P, V
+    d_model = Wt_dm_dh.shape[0]
+    dh = Wt_dm_dh.shape[1] // num_heads
+    Wt3 = Wt_dm_dh.view(d_model, num_heads, dh)
 
+    Us, Vs = [], []
+    for h in range(num_heads):
+        Wh = Wt3[:, h, :]  # [d_model, dh]
+        Uh, Vh = _data_aware_low_rank(Wh, rank, cov_in)
+        Us.append(Uh)                 # [d_model, rank]
+        Vs.append(Vh)                 # [rank, dh]
+    U = torch.stack(Us, dim=0)        # [H, d_model, rank]
+    V = torch.stack(Vs, dim=0)        # [H, rank, dh]
+    return U, V
 
-# ─── 1) Collect activations X per encoder layer ───────────────────────────────
-@torch.no_grad()
-def collect_calibration_X(model, loader, device, tokens_per_layer=8192, max_batches=50):
-    """
-    For each encoder layer i:
-      - X_attn[i]: inputs to self-attention (shape d_model x N_i)
-      - X_ffn[i] : inputs to intermediate.dense (shape d_model x N_i)
-    """
-    L = len(model.bert.encoder.layer)
-    d_model = model.config.hidden_size
-
-    attn_buf = {i: [] for i in range(L)}
-    ffn_buf  = {i: [] for i in range(L)}
-    attn_cnt = {i: 0 for i in range(L)}
-    ffn_cnt  = {i: 0 for i in range(L)}
-
-    hooks = []
-
-    def make_attn_hook(idx):
-        def _hook(mod, inputs, output):
-            if attn_cnt[idx] >= tokens_per_layer: return
-            h = inputs[0].detach()                       # (B, M, d_model)
-            B, M, D = h.shape
-            take = min((tokens_per_layer - attn_cnt[idx]), B*M)
-            if take <= 0: return
-            # random subset of tokens for diversity
-            flat = h.reshape(B*M, D)
-            idxs = torch.randperm(B*M, device=flat.device)[:take]
-            samp = flat[idxs].cpu().float().T            # (D, take)
-            attn_buf[idx].append(samp)
-            attn_cnt[idx] += take
-        return _hook
-
-    def make_ffn_hook(idx):
-        def _hook(mod, inputs, output):
-            if ffn_cnt[idx] >= tokens_per_layer: return
-            h = inputs[0].detach()                       # (B, M, d_model), input to intermediate
-            B, M, D = h.shape
-            take = min((tokens_per_layer - ffn_cnt[idx]), B*M)
-            if take <= 0: return
-            flat = h.reshape(B*M, D)
-            idxs = torch.randperm(B*M, device=flat.device)[:take]
-            samp = flat[idxs].cpu().float().T            # (D, take)
-            ffn_buf[idx].append(samp)
-            ffn_cnt[idx] += take
-        return _hook
-
-    # register hooks
-    for i, layer in enumerate(model.bert.encoder.layer):
-        hooks.append(layer.attention.self.register_forward_hook(make_attn_hook(i)))
-        hooks.append(layer.intermediate.register_forward_hook(make_ffn_hook(i)))
-
-    # run a few batches
-    model.to(device).eval()
-    seen = 0
-    for batch in loader:
-        batch = {k: v.to(device) for k, v in batch.items()}
-        _ = model(input_ids=batch["input_ids"],
-                  attention_mask=batch["attention_mask"],
-                  labels=batch["labels"])
-        seen += 1
-        if seen >= max_batches: break
-        # early exit if all filled
-        if all(attn_cnt[i] >= tokens_per_layer for i in range(L)) and \
-           all(ffn_cnt[i]  >= tokens_per_layer for i in range(L)):
-            break
-
-    # cleanup
-    for h in hooks: h.remove()
-
-    # pack to tensors (d_model, N)
-    X_attn = {i: (torch.cat(attn_buf[i], dim=1) if attn_buf[i] else torch.empty(d_model,0)) for i in range(L)}
-    X_ffn  = {i: (torch.cat(ffn_buf[i],  dim=1) if ffn_buf[i]  else torch.empty(d_model,0)) for i in range(L)}
-    return X_attn, X_ffn
-
-
-
-
-# ─── 2) LayerShim ────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
+# 1) LayerShim
+# -----------------------------------------------------------------------------
 class LayerShim(nn.Module):
     def __init__(self, block: nn.Module):
         super().__init__()
@@ -216,19 +136,24 @@ class LayerShim(nn.Module):
     def forward(self, hidden_states, attention_mask=None, *args, **kwargs):
         raw_mask = attention_mask
         if attention_mask is not None and attention_mask.dim() == 4:
-            raw_mask = (attention_mask[:,0,0,:] == 0)
+            raw_mask = (attention_mask[:, 0, 0, :] == 0)
         return (self.block(hidden_states, raw_mask),)
 
-
 # -----------------------------------------------------------------------------
-# 2) Pure-PyTorch FWSVD-block
+# 2) Data-aware SVDBlock (DRONE)
 # -----------------------------------------------------------------------------
 class SVDBlock(nn.Module):
-    def __init__(self, hf_layer, rank_attn: int, rank_ff: int,
-                 svd_per_head: Callable, svd_low_rank: Callable,
-                 rank_wo: int = 768,
-                 X_attn: torch.Tensor = None,   # (d_model, N)  calibration for Q/K/V
-                 X_ffn:  torch.Tensor = None):  # (d_model, N)  calibration for FFN-in
+    def __init__(
+        self,
+        hf_layer,
+        rank_attn: int,
+        rank_ff: int,
+        cov_attn_in: torch.Tensor,
+        cov_attn_out: torch.Tensor,
+        cov_ffn_in: torch.Tensor,
+        cov_ffn_out: torch.Tensor,
+        rank_wo: int = 768,
+    ):
         super().__init__()
         cfg     = hf_layer.attention.self
         d_model = cfg.all_head_size
@@ -236,120 +161,78 @@ class SVDBlock(nn.Module):
         dh      = d_model // H
         d_ff    = hf_layer.intermediate.dense.out_features
 
-        # 1) grab raw weights
-        WqT = hf_layer.attention.self.query.weight.data.t()   # (d_model, d_model)
+        # 1) grab weights (transpose to [d_in, d_out] as in original code)
+        WqT = hf_layer.attention.self.query.weight.data.t()   # [dm, dm] but we do per-head slicing
         WkT = hf_layer.attention.self.key.weight.data.t()
         WvT = hf_layer.attention.self.value.weight.data.t()
         bq  = hf_layer.attention.self.query.bias.data.view(1, H, 1, dh)
         bk  = hf_layer.attention.self.key.bias.data.view(1, H, 1, dh)
         bv  = hf_layer.attention.self.value.bias.data.view(1, H, 1, dh)
 
-        # reshape heads
-        WqT3, WkT3, WvT3 = WqT.view(d_model, H, dh), WkT.view(d_model, H, dh), WvT.view(d_model, H, dh)
+        # 2) DRONE factorization per head on Q/K/V using cov_attn_in (dm x dm)
+        Uq, Vq = _data_aware_per_head(WqT, rank_attn, cov_attn_in, H)
+        Uk, Vk = _data_aware_per_head(WkT, rank_attn, cov_attn_in, H)
+        Uv, Vv = _data_aware_per_head(WvT, rank_attn, cov_attn_in, H)
 
-        # 1a) DRONE per head for Q/K/V using X_attn (fall back to SVD if none)
-        Us_q, Vs_q, Us_k, Vs_k, Us_v, Vs_v = [], [], [], [], [], []
-        for h in range(H):
-            Wh_q = WqT3[:, h, :]
-            Wh_k = WkT3[:, h, :]
-            Wh_v = WvT3[:, h, :]
-            if X_attn is not None and X_attn.numel() > 0:
-                Pq, Vq = drone_per_head(Wh_q, X_attn, rank_attn)
-                Pk, Vk = drone_per_head(Wh_k, X_attn, rank_attn)
-                Pv, Vv = drone_per_head(Wh_v, X_attn, rank_attn)
-            else:
-                # fallback to your plain SVD
-                Pq, Vq = svd_low_rank(Wh_q, rank_attn)
-                Pk, Vk = svd_low_rank(Wh_k, rank_attn)
-                Pv, Vv = svd_low_rank(Wh_v, rank_attn)
-            Us_q.append(Pq); Vs_q.append(Vq)
-            Us_k.append(Pk); Vs_k.append(Vk)
-            Us_v.append(Pv); Vs_v.append(Vv)
-
-        self.Pq, self.Vq, self.bq = map(nn.Parameter, (torch.stack(Us_q, 0), torch.stack(Vs_q, 0), bq))
-        self.Pk, self.Vk, self.bk = map(nn.Parameter, (torch.stack(Us_k, 0), torch.stack(Vs_k, 0), bk))
-        self.Pv, self.Vv, self.bv = map(nn.Parameter, (torch.stack(Us_v, 0), torch.stack(Vs_v, 0), bv))
-
-        # 2) FFN (intermediate) via DRONE on Wi^T : (d_model, d_ff)
-        Wi   = hf_layer.intermediate.dense.weight.data.t()   # (d_model, d_ff)
+        # 3) FFN factorization (data-aware)
+        Wi   = hf_layer.intermediate.dense.weight.data.t()     # [dm, d_ff]
         bi   = hf_layer.intermediate.dense.bias.data
-        if X_ffn is not None and X_ffn.numel() > 0:
-            # drone_low_rank expects W(d_out,d_in) so pass Wi^T, X_ffn(d_model, N)
-            P1, V1 = drone_low_rank(Wi.T.contiguous(), X_ffn, rank_ff)  # P1:(d_model,k), V1:(k,d_ff)
-            U1, V1 = P1, V1
-        else:
-            U1, V1 = svd_low_rank(Wi, rank_ff)   # fallback to SVD
+        WoT  = hf_layer.output.dense.weight.data.t()           # [d_ff, dm]
+        bo2  = hf_layer.output.dense.bias.data
+
+        U1, V1 = _data_aware_low_rank(Wi,  rank_ff, cov_ffn_in)   # input cov: dm x dm
+        U2, V2 = _data_aware_low_rank(WoT, rank_ff, cov_ffn_out)  # input cov: d_ff x d_ff
+
+        # 4) Attention output projection W_o (data-aware)
+        Wo_full = hf_layer.attention.output.dense.weight.data    # [dm, dm] (out,in)
+        bo_attn = hf_layer.attention.output.dense.bias.data
+        # We followed the original code convention to pass .t() so shape is [dm, dm]
+        Uo, Vo = _data_aware_low_rank(Wo_full.t(), rank_wo, cov_attn_out)  # input cov: dm x dm
+
+        # stash everything as Parameters
+        self.Pq, self.Vq, self.bq = map(nn.Parameter, (Uq.unsqueeze(0), Vq.unsqueeze(0), bq))
+        self.Pk, self.Vk, self.bk = map(nn.Parameter, (Uk.unsqueeze(0), Vk.unsqueeze(0), bk))
+        self.Pv, self.Vv, self.bv = map(nn.Parameter, (Uv.unsqueeze(0), Vv.unsqueeze(0), bv))
+
+        self.Uo, self.Vo, self.bo_attn = nn.Parameter(Uo), nn.Parameter(Vo), nn.Parameter(bo_attn)
 
         self.U1, self.V1, self.b1 = nn.Parameter(U1), nn.Parameter(V1), nn.Parameter(bi)
+        self.U2, self.V2, self.b2 = nn.Parameter(U2), nn.Parameter(V2), nn.Parameter(bo2)
 
-        # 3) FFN (output) and attention-output projection: keep your SVD (stable default)
-        WoT  = hf_layer.output.dense.weight.data.t()         # (d_ff, d_model)
-        bo2  = hf_layer.output.dense.bias.data
-        U2, V2 = svd_low_rank(WoT, rank_ff)
+        self.ln1, self.ln2 = hf_layer.attention.output.LayerNorm, hf_layer.output.LayerNorm
 
-        Wo_full = hf_layer.attention.output.dense.weight.data  # (d_model, d_model)
-        bo_attn = hf_layer.attention.output.dense.bias.data
-        Uo, Vo  = svd_low_rank(Wo_full.t(), rank_wo)
-
-        self.U2, self.V2, self.b2     = nn.Parameter(U2), nn.Parameter(V2), nn.Parameter(bo2)
-        self.Uo, self.Vo, self.bo_attn= nn.Parameter(Uo), nn.Parameter(Vo), nn.Parameter(bo_attn)
-        self.ln1, self.ln2            = hf_layer.attention.output.LayerNorm, hf_layer.output.LayerNorm
-    
-    
-    
     def forward(self, x, mask=None):
         B, M, dm = x.shape
-        H = self.Pq.shape[0] if self.Pq.dim()==3 else self.Pq.shape[1]
+        _, H, _, R = self.Pq.shape
         dh = dm // H
-        scale = 1.0 / math.sqrt(dh)
 
         # project into low-rank Q/K/V
         def project(x, P, V, b):
-            # x: [B,M,dm], P: [H,dm,r], V: [H,r,dh], b: [1,H,1,dh]
-            tmp = torch.einsum("bmd,hdr->bhmr", x, P)     # [B,H,M,r]
-            return torch.einsum("bhmr,hrd->bhmd", tmp, V) + b  # [B,H,M,dh]
+            # x:[B,M,dm], P:[H,dm,R], V:[H,R,dh], b:[1,H,1,dh]
+            tmp = torch.einsum("bmd,hdr->bhmr", x, P)
+            return torch.einsum("bhmr,hrd->bhmd", tmp, V) + b
 
-        Q = project(x, self.Pq if self.Pq.dim()==3 else self.Pq[0], 
-                       self.Vq if self.Vq.dim()==3 else self.Vq[0], self.bq).contiguous()
-        K = project(x, self.Pk if self.Pk.dim()==3 else self.Pk[0], 
-                       self.Vk if self.Vk.dim()==3 else self.Vk[0], self.bk).contiguous()
-        V = project(x, self.Pv if self.Pv.dim()==3 else self.Pv[0], 
-                       self.Vv if self.Vv.dim()==3 else self.Vv[0], self.bv).contiguous()
+        Q = project(x, self.Pq[0], self.Vq[0], self.bq).contiguous()
+        K = project(x, self.Pk[0], self.Vk[0], self.bk).contiguous()
+        V = project(x, self.Pv[0], self.Vv[0], self.bv).contiguous()
 
-        # attention mask -> [B,H,1,M] bool (True = keep)
-        # mask: [B, M], True means "keep"; flash_attn wants pad=True → invert
+        # Attention mask
         if mask is not None:
-            if mask.dtype != torch.bool:
-                keep = mask > 0
-            else:
-                keep = mask
-            key_pad = ~keep                              # invert: True on PADs
-            mask4d  = key_pad.view(B, 1, 1, M).expand(B, H, 1, M)
+            mask4d = mask.view(B, 1, 1, M).expand(B, H, 1, M).to(torch.bool)
         else:
-            # no pads → all False (no masking)
-            mask4d = torch.zeros(B, H, 1, M, device=x.device, dtype=torch.bool)
+            mask4d = torch.ones(B, H, 1, M, device=x.device, dtype=torch.bool)
 
-        # FlashAttention expects [B,H,M,dh]
-        #attn = flash_attn_triton(Q, K, V, mask4d, BLOCK_M=32)  # [B,H,M,dh]
-        USE_FLASH_ATTN = False
-        if USE_FLASH_ATTN:
-            attn = flash_attn_triton(Q, K, V, mask4d, BLOCK_M=32)  # [B,H,M,dh]
-        else:
-            # safe, reference attention to verify behavior
-            scale = 1.0 / math.sqrt(dh)
-            logits = torch.einsum("bhmd,bhnd->bhmn", Q, K) * scale
-            logits = logits.masked_fill(mask4d, float("-1e9"))     # mask True = pad
-            A = torch.softmax(logits, dim=-1)
-            attn = torch.einsum("bhmn,bhnd->bhmd", A, V)
-    
+        # Flash-attn returns [B, H, M, dh] float32
+        attn = flash_attn_triton(Q, K, V, mask4d, BLOCK_M=32)
+
+        del Q, K, V
+        torch.cuda.empty_cache()
+
         # back to [B,M,dm]
         attn = attn.transpose(1, 2).reshape(B, M, dm)
+        x1   = self.ln1(x + (attn @ self.Uo) @ self.Vo + self.bo_attn)
 
-        # attention output projection (low-rank Wo)
-        x_resid = (attn @ self.Uo) @ self.Vo + self.bo_attn
-        x1 = self.ln1(x + x_resid)
-
-        # FFN (low-rank)
+        # FFN: (dm -> d_ff -> dm)
         mid  = x1 @ self.U1
         midV = mid @ self.V1
         midA = F.gelu(midV + self.b1)
@@ -357,33 +240,154 @@ class SVDBlock(nn.Module):
         out  = self.ln2(x1 + y)
         return out
 
+# -----------------------------------------------------------------------------
+# 3) Calibration: collect per-layer input covariances (one-shot)
+# -----------------------------------------------------------------------------
+@torch.no_grad()
+def calibrate_covariances(model: BertForSequenceClassification,
+                          loader: DataLoader,
+                          device: str,
+                          max_batches: int = 4) -> Dict[str, List[torch.Tensor]]:
+    """
+    Collects (online) covariance estimates for inputs of:
+      - attention.self.query (shared for Q/K/V)  -> dm x dm
+      - attention.output.dense                   -> dm x dm
+      - intermediate.dense                       -> dm x dm
+      - output.dense (FFN out, post-GELU input)  -> d_ff x d_ff
+    Returns dict with lists over layers.
+    """
+    model.eval()
+    enc = model.bert.encoder
+    num_layers = len(enc.layer)
+    dm = model.config.hidden_size
+    d_ff = model.config.intermediate_size
 
+    # Allocate accumulators on CUDA for speed; finalize to CPU later
+    cov_attn_in  = [torch.zeros(dm, dm,  dtype=torch.float32, device=device) for _ in range(num_layers)]
+    n_attn_in    = [0 for _ in range(num_layers)]
 
-# Updated `if __name__ == "__main__":` with absolute low-rank factors memory
+    cov_attn_out = [torch.zeros(dm, dm,  dtype=torch.float32, device=device) for _ in range(num_layers)]
+    n_attn_out   = [0 for _ in range(num_layers)]
+
+    cov_ffn_in   = [torch.zeros(dm, dm,  dtype=torch.float32, device=device) for _ in range(num_layers)]
+    n_ffn_in     = [0 for _ in range(num_layers)]
+
+    cov_ffn_out  = [torch.zeros(d_ff, d_ff, dtype=torch.float32, device=device) for _ in range(num_layers)]
+    n_ffn_out    = [0 for _ in range(num_layers)]
+
+    handles = []
+
+    def _upd(cov_mat, n_store, idx, x):
+        # x:[B,M,D] -> [N,D]
+        if x is None:
+            return
+        x = x.detach()
+        BMD = x.shape[0] * x.shape[1]
+        X2d = x.reshape(BMD, x.shape[-1]).to(device=device, dtype=torch.float32)
+        cov_mat[idx] += X2d.t() @ X2d
+        n_store[idx] += BMD
+
+    # Register hooks
+    for i, layer in enumerate(enc.layer):
+        # Inputs to Q/K/V (they share the same input): hook query pre-forward
+        def q_pre_hook(mod, inp, idx=i):
+            _upd(cov_attn_in, n_attn_in, idx, inp[0])
+        handles.append(layer.attention.self.query.register_forward_pre_hook(q_pre_hook))
+
+        # Inputs to attention.output.dense (post attention, before add&norm)
+        def attn_out_pre_hook(mod, inp, idx=i):
+            _upd(cov_attn_out, n_attn_out, idx, inp[0])
+        handles.append(layer.attention.output.dense.register_forward_pre_hook(attn_out_pre_hook))
+
+        # Inputs to intermediate.dense (after LN1)
+        def ffn_in_pre_hook(mod, inp, idx=i):
+            _upd(cov_ffn_in, n_ffn_in, idx, inp[0])
+        handles.append(layer.intermediate.dense.register_forward_pre_hook(ffn_in_pre_hook))
+
+        # Inputs to FFN output.dense (post-GELU)
+        def ffn_out_pre_hook(mod, inp, idx=i):
+            _upd(cov_ffn_out, n_ffn_out, idx, inp[0])
+        handles.append(layer.output.dense.register_forward_pre_hook(ffn_out_pre_hook))
+
+    # Run a few batches to collect stats
+    seen = 0
+    for batch in loader:
+        if seen >= max_batches:
+            break
+        batch = {k: v.to(device) for k, v in batch.items()}
+        _ = model(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"])
+        seen += 1
+
+    # Remove hooks
+    for h in handles:
+        h.remove()
+
+    # Finalize covariance: normalize and add small ridge for stability; move to CPU
+    def _finalize(cov_list, n_list):
+        out = []
+        for C, n in zip(cov_list, n_list):
+            if n == 0:
+                # fallback to identity if no samples (shouldn't happen)
+                D = C.shape[0]
+                Cn = torch.eye(D, dtype=torch.float32, device=C.device)
+            else:
+                Cn = C / float(n)
+                # light ridge
+                ridge = 1e-6 * float(Cn.diag().mean().item() + 1.0)
+                Cn = Cn + ridge * torch.eye(Cn.shape[0], dtype=Cn.dtype, device=Cn.device)
+            out.append(Cn.cpu())
+        return out
+
+    return {
+        "cov_attn_in":  _finalize(cov_attn_in,  n_attn_in),
+        "cov_attn_out": _finalize(cov_attn_out, n_attn_out),
+        "cov_ffn_in":   _finalize(cov_ffn_in,   n_ffn_in),
+        "cov_ffn_out":  _finalize(cov_ffn_out,  n_ffn_out),
+    }
+
+# -----------------------------------------------------------------------------
+# 4) Benchmark helper
+# -----------------------------------------------------------------------------
+@torch.no_grad()
+def acc_peak_time(mdl, loader, device, task_name: str):
+    mdl.eval()
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
+    if task_name == "stsb":
+        metric = load_metric("pearsonr")
+        metric_key = "pearsonr"
+    else:
+        metric = load_metric("accuracy")
+        metric_key = "accuracy"
+    total, steps = 0.0, 0
+    start = time.perf_counter()
+    for batch in loader:
+        batch = {k: v.to(device) for k, v in batch.items()}
+        logits = mdl(input_ids=batch["input_ids"],
+                     attention_mask=batch["attention_mask"]).logits
+        if task_name == "stsb":
+            preds = logits.squeeze(-1)
+        else:
+            preds = torch.argmax(logits, -1)
+        total += metric.compute(predictions=preds.cpu(), references=batch["labels"].cpu())[metric_key]
+        steps += 1
+    torch.cuda.synchronize()
+    ms_per_batch = (time.perf_counter() - start) * 1000.0 / max(steps, 1)
+    peak = torch.cuda.max_memory_allocated() / 1024**2
+    return total / max(steps, 1), peak, ms_per_batch
+
+# -----------------------------------------------------------------------------
+# 5) Main
+# -----------------------------------------------------------------------------
 if __name__ == "__main__":
-    import os, time, itertools, torch
-    from torch.utils.data import DataLoader
-    from datasets import load_dataset
-    from transformers import BertForSequenceClassification, AutoTokenizer
-    from evaluate import load as load_metric
-    from torch.profiler import profile, ProfilerActivity
-
-
     BATCH_SIZE = 32
-    SEQ_LEN    = 128*2
+    SEQ_LEN    = 128 * 2
     device     = "cuda"
-    RANK_ATTN  = 40 # 
-    RANK_FF    = 240 # 576 # 
-    RANK_WO    = 240 # 576 # 
-    
-    # (60, 480, 480),   # 10%
-    # (56, 384, 384),   # Conservative % 25% reduction
-    # (48, 336, 336),   # 35%
-    # (48, 288, 288),   # Conservative % 
-    # (40, 240, 240),   # Conservative % 50% reduction
-    # (32, 192, 192),   # Conservative % 60%
-    
-    # ─── 3) Load & tokenize GLUE ──────────────────────────────────────────────
+    RANK_ATTN  = 64 // 2
+    RANK_FF    = 768 // 2
+    RANK_WO    = 768 // 2
+
+    # ─── GLUE load & tokenize ────────────────────────────────────────────────
     if task_name == "mnli":
         val_split = "validation_matched"
     else:
@@ -391,46 +395,26 @@ if __name__ == "__main__":
     raw = load_dataset("glue", task_name, split=val_split)
     tokz = AutoTokenizer.from_pretrained(MODEL_DIR)
 
-    # Which GLUE tasks take one sentence vs. two?
     single_sent_tasks = {"cola", "sst2"}
     pair_sent_tasks   = {"qqp", "mnli", "qnli", "stsb", "rte", "mrpc"}
-    # map each pair task to its two fields
     field_map = {
-      "qqp":  ("question1",   "question2"),
-      "mnli": ("premise",     "hypothesis"),
-      "qnli": ("question",    "sentence"),
-      "stsb": ("sentence1",   "sentence2"),
-      "rte":  ("sentence1",   "sentence2"),
-      "mrpc":  ("sentence1",   "sentence2"),
+        "qqp":  ("question1", "question2"),
+        "mnli": ("premise",   "hypothesis"),
+        "qnli": ("question",  "sentence"),
+        "stsb": ("sentence1", "sentence2"),
+        "rte":  ("sentence1", "sentence2"),
+        "mrpc": ("sentence1", "sentence2"),
     }
 
     def tokenize_fn(batch):
         if task_name in single_sent_tasks:
-            # e.g. SST-2 / CoLA
-            return tokz(
-                batch["sentence"],
-                padding="max_length",
-                truncation=True,
-                max_length=SEQ_LEN,
-            )
+            return tokz(batch["sentence"], padding="max_length", truncation=True, max_length=SEQ_LEN)
         else:
-            # QQP, MNLI, QNLI, STS-B
             f1, f2 = field_map[task_name]
-            return tokz(
-                batch[f1],
-                batch[f2],
-                padding="max_length",
-                truncation=True,
-                max_length=SEQ_LEN,
-            )
+            return tokz(batch[f1], batch[f2], padding="max_length", truncation=True, max_length=SEQ_LEN)
 
-    # drop _all_ original columns except `label`
     remove_cols = [c for c in raw.column_names if c != "label"]
-    ds = raw.map(
-        tokenize_fn,
-        batched=True,
-        remove_columns=remove_cols,
-    )
+    ds = raw.map(tokenize_fn, batched=True, remove_columns=remove_cols)
     ds.set_format("torch")
     loader = DataLoader(
         ds,
@@ -439,177 +423,73 @@ if __name__ == "__main__":
         collate_fn=lambda b: {
             "input_ids":      torch.stack([x["input_ids"]      for x in b]),
             "attention_mask": torch.stack([x["attention_mask"] for x in b]),
-            "labels": torch.tensor(
-                [x["label"] for x in b],
-                dtype=torch.float32 if task_name == "stsb" else torch.long
-            ),
+            "labels":         torch.tensor([x["label"]         for x in b]),
         },
     )
 
-
     print(f"BATCH_SIZE: {BATCH_SIZE}  RANK_ATTN: {RANK_ATTN}  RANK_FF: {RANK_FF}  RANK_WO: {RANK_WO}")
 
-    # 3) Load & prep model in FP32
-    # Choose the right metric for the task
-    if task_name == "stsb":
-        metric = load_metric("pearsonr")
-    else:
-        metric = load_metric("accuracy")
-    
-    #model = BertForSequenceClassification.from_pretrained(MODEL_DIR, num_labels=2)
-    # pick the right # of labels (and problem_type for STS-B)
+    # ─── Build & move model ──────────────────────────────────────────────────
     if task_name == "mnli":
-        num_labels = 3
-        problem_type = None
+        num_labels, problem_type = 3, None
     elif task_name == "stsb":
-        # STS-B is a regression task
-        num_labels     = 1
-        problem_type   = "regression"
+        num_labels, problem_type = 1, "regression"
     else:
-        # all the binary‐classification GLUE tasks
-        num_labels   = 2
-        problem_type = None
+        num_labels, problem_type = 2, None
 
-    # build a config that matches the checkpoint
-    cfg = AutoConfig.from_pretrained(
-        MODEL_DIR,
-        num_labels=num_labels,
-        problem_type=problem_type,
-    )
-    # now load with that config
-    model = BertForSequenceClassification.from_pretrained(
-        MODEL_DIR,
-        config=cfg,
-    )
+    cfg = AutoConfig.from_pretrained(MODEL_DIR, num_labels=num_labels, problem_type=problem_type)
+    model = BertForSequenceClassification.from_pretrained(MODEL_DIR, config=cfg)
     model = model.to(device).eval()
-    
-    # Calibrate (collect X for DRONE). Tune tokens/batches as you like.
-    TOKENS_PER_LAYER = 4096
-    MAX_CALIB_BATCH  = 50
-
-    print("Calibrating activations for DRONE ...")
-    X_attn_map, X_ffn_map = collect_calibration_X(model, loader, device,
-                                                tokens_per_layer=TOKENS_PER_LAYER,
-                                                max_batches=MAX_CALIB_BATCH)
 
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
     torch.cuda.synchronize()
 
-    CACHED_ORIG_MEM = torch.cuda.max_memory_allocated()/1024**2#torch.cuda.max_memory_reserved()/1024**2#compute_persistent_memory(model)
-    print(f"Persistent model storage: {CACHED_ORIG_MEM:6.1f} MiB")
+    # ─── Calibration pass: collect covariances ───────────────────────────────
+    print("Calibrating input covariances (DRONE)…")
+    covs = calibrate_covariances(model, loader, device, max_batches=4)
 
-    # 3.1) Persistent memory helper
-    # def compute_persistent_memory(m):
-    #     total = 0
-    #     for p in itertools.chain(m.parameters(), m.buffers()):
-    #         total += p.numel() * p.element_size()
-    #     return total / (1024**2)
+    # ─── Replace each encoder layer with data-aware low-rank block ───────────
+    for i, layer in enumerate(model.bert.encoder.layer):
+        blk = SVDBlock(
+            hf_layer=layer,
+            rank_attn=RANK_ATTN,
+            rank_ff=RANK_FF,
+            cov_attn_in=covs["cov_attn_in"][i].to(device),
+            cov_attn_out=covs["cov_attn_out"][i].to(device),
+            cov_ffn_in=covs["cov_ffn_in"][i].to(device),
+            cov_ffn_out=covs["cov_ffn_out"][i].to(device),
+            rank_wo=RANK_WO,
+        )
+        model.bert.encoder.layer[i] = LayerShim(blk).to(device).eval().float()
 
-    # 4) Build SVD helpers
-    svd_per_head, svd_low_rank = build_plain_svd_helpers(model)
-    
-    
+    # ─── Memory accounting (persistent params only) ──────────────────────────
     def summarize_dense_vs_lowrank(model):
         dense_bytes, lowrank_bytes = 0, 0
-
         for name, p in model.named_parameters():
             size = p.numel() * p.element_size()
-            # assume any param under "block." is low-rank
-            if ".block." in name or name.startswith("bert.encoder.layer") and any(
-                part in name for part in ("Pq","Vq","Pk","Vk","Pv","Vv","U1","V1","U2","V2","Uo","Vo")
+            if ".block." in name or (
+                name.startswith("bert.encoder.layer")
+                and any(part in name for part in ("Pq","Vq","Pk","Vk","Pv","Vv","U1","V1","U2","V2","Uo","Vo"))
             ):
                 lowrank_bytes += size
             else:
-                dense_bytes   += size
-
+                dense_bytes += size
         print(f"{'Type':<12}{'MiB':>8}")
         print("----------------------")
         print(f"{'Dense':<12}{dense_bytes/1024**2:8.1f}")
         print(f"{'Low-rank':<12}{lowrank_bytes/1024**2:8.1f}")
         print("----------------------")
         print(f"{'TOTAL':<12}{(dense_bytes+lowrank_bytes)/1024**2:8.1f}")
-        base_mem = (dense_bytes+lowrank_bytes)
-        return base_mem 
+        return (dense_bytes+lowrank_bytes)
 
-
-    # 5) Cache original layers
-    #orig_layers = list(model.bert.encoder.layer)
-
-    # 6) Benchmark helper
-    @torch.no_grad()
-    def acc_peak_time(mdl, use_mask=True):
-        mdl.eval()
-        torch.cuda.empty_cache()
-        torch.cuda.reset_peak_memory_stats()
-        total_acc, steps = 0.0, 0
-        start = time.perf_counter()
-        for batch in loader:
-            batch = {k:v.to(device) for k,v in batch.items()}
-            logits = mdl(input_ids=batch["input_ids"],
-                         attention_mask=batch["attention_mask"] if use_mask else None).logits
-            
-            # Handle predictions based on task type
-            if task_name == "stsb":
-                # For regression (STS-B), use raw logits as predictions
-                preds = logits.squeeze(-1)  # Remove last dimension for regression
-            else:
-                # For classification, use argmax
-                preds = torch.argmax(logits, -1)
-            
-            total_acc += metric.compute(
-                predictions=preds.cpu(),
-                references=batch["labels"].cpu()
-            )["pearsonr" if task_name == "stsb" else "accuracy"]
-            steps += 1
-        torch.cuda.synchronize()
-        elapsed = (time.perf_counter() - start)*1000/steps
-        peak = torch.cuda.max_memory_allocated()/1024**2
-        return total_acc/steps, peak, elapsed
-
-    # 8) Patch in low-rank SVD blocks
-    #for i, layer in enumerate(orig_layers):
-    for i, layer in enumerate(model.bert.encoder.layer):
-        X_attn_i = X_attn_map.get(i, None)
-        X_ffn_i  = X_ffn_map.get(i,  None)
-        blk = SVDBlock(layer, RANK_ATTN, RANK_FF, svd_per_head, svd_low_rank,
-                        RANK_WO, X_attn=X_attn_i, X_ffn=X_ffn_i)
-        model.bert.encoder.layer[i] = LayerShim(blk).to(device).eval().float()
-
-    
-    
-    del layer, blk, svd_per_head, svd_low_rank
-    # if you built helpers per-layer, you might also need:
-    for layer in model.bert.encoder.layer:
-        # suppose your block stores them as attributes:
-        if hasattr(layer, 'svd_per_head'):
-            del layer.svd_per_head
-        if hasattr(layer, 'svd_low_rank'):
-            del layer.svd_low_rank
-
-    baseline = summarize_dense_vs_lowrank(model) / 1024**2
-
-    import gc
-    gc.collect()
-    torch.cuda.empty_cache()
-    torch.cuda.reset_peak_memory_stats()
-    torch.cuda.synchronize()
-
-    # we use the profile_flashsvd_offload to validate the result of above, which turn out to be accurate. 
+    baseline_bytes = summarize_dense_vs_lowrank(model)
     with_act = torch.cuda.max_memory_allocated() / 1024**2
-    print(f"low-rank model storage with GPU Redundancy: {with_act:.1f} MiB")
-            
-    torch.cuda.empty_cache()
-    torch.cuda.reset_peak_memory_stats()
-    torch.cuda.synchronize()
-    
-    # ----- Flash-FW ------------------------------------------------------------
-    CACHED_ORIG_MEM = baseline#torch.cuda.max_memory_allocated()/1024**2#compute_persistent_memory(model)
-    print(f"Persistent low-rank model storage (SVD): {CACHED_ORIG_MEM:6.1f} MiB")
+    print(f"low-rank model storage with GPU redundancy: {with_act:.1f} MiB")
 
-    # 9) LowRank SVD inference
+    print(f"Persistent low-rank model storage (DRONE): {baseline_bytes/1024**2:6.1f} MiB")
+
+    # ─── Evaluate ────────────────────────────────────────────────────────────
     metric_name = "pearson" if task_name == "stsb" else "acc"
-    acc, peak_lr, t = acc_peak_time(model)
-    print(f"LowRank SVD     | {metric_name}={acc:.4f} | peak ={(peak_lr):6.1f} MiB | real peak ={(peak_lr-with_act + CACHED_ORIG_MEM):6.1f} MiB | Transient={(peak_lr-with_act):6.1f} MiB | {t:6.1f} ms/b")
-
-
+    acc, peak_lr, t = acc_peak_time(model, loader, device, task_name)
+    print(f"Data-aware (DRONE) | {metric_name}={acc:.4f} | peak ={peak_lr:6.1f} MiB | {t:6.1f} ms/b")
