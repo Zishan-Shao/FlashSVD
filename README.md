@@ -27,7 +27,7 @@ Our experiments demonstrate that this activation overhead, scaling with sequence
 
 ### Pipeline
 
-![FlashSVD Pipeline](figs/pipeline.png)
+![FlashSVD Pipeline](figs/pipeline.pdf)
 
 The figure above illustrates the FlashSVD computation pipeline, showing the efficient flow from input through low-rank attention and feed-forward layers.
 
