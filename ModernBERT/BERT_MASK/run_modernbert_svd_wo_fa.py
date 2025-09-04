@@ -3,6 +3,7 @@ import os
 import copy
 from typing import Optional
 import time
+import math 
 
 import torch
 import torch.nn as nn
@@ -13,9 +14,6 @@ from torch.utils.data import DataLoader
 from transformers import AutoConfig, AutoTokenizer, AutoModelForSequenceClassification
 from transformers.modeling_attn_mask_utils import _prepare_4d_attention_mask
 from evaluate import load as load_metric
-
-# Import FlashAttention
-from flash_attn_triton import flash_attn_triton_flex
 
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
@@ -96,7 +94,7 @@ class ExplicitSVDLinear(nn.Module):
 
 
 # ----------------------------
-# Head-wise SVD for correct compression
+# SVD Q/K/V as explicit low-rank matmul
 # ----------------------------
 class HeadwiseSVDLinear(nn.Module):
     """
@@ -186,6 +184,40 @@ class ExplicitSVDQKV(nn.Module):
         return self.q(x), self.k(x), self.v(x)
 
 
+def scaled_dot_product_attention_unfused(
+    q: torch.Tensor,              # [B,H,M,dh]
+    k: torch.Tensor,              # [B,H,M,dh]
+    v: torch.Tensor,              # [B,H,M,dh]
+    attn_mask: torch.Tensor=None  # bool [B,1,1,M] (True=mask) OR additive [B,1/H or H,M,M]
+) -> torch.Tensor:                # returns [B,H,M,dh]
+    B, H, M, dh = q.shape
+    # do logits in fp32 for stability
+    scores = (q @ k.transpose(-2, -1)).to(torch.float32) * (1.0 / math.sqrt(dh))  # [B,H,M,M]
+
+    if attn_mask is not None:
+        if attn_mask.dtype == torch.bool:
+            # bool: shape [B,1,1,M] with True = MASK → expand over H and query length M
+            # broadcast to [B,H,M,M] and set masked positions to -inf
+            kpm = attn_mask
+            if kpm.dim() == 4 and kpm.shape[-2:] == (1, M):  # [B,1,1,M]
+                kpm = kpm.expand(B, H, M, M)                 # mask columns (keys)
+            else:
+                # if user passed [B,1,1,M] already, expand; otherwise assume broadcastable
+                kpm = kpm.expand(B, H, M, M)
+            scores.masked_fill_(kpm, torch.finfo(scores.dtype).min)
+        else:
+            # additive: 0 keep, negative large = block; upcast and broadcast if needed
+            m = attn_mask.to(scores.dtype)
+            if m.dim() == 4:
+                # accept [B,1,M,M], [B,H,M,M], or [B,1/H,M,M]
+                if m.shape[1] == 1 and H > 1:
+                    m = m.expand(B, H, M, M)
+            scores = scores + m
+
+    probs = F.softmax(scores, dim=-1).to(q.dtype)  # cast back to q dtype (bf16/fp16)
+    return probs @ v  # [B,H,M,dh]
+
+
 # ----------------------------
 # Explicit ModernBERT block with SVD (incl. explicit GEGLU MLP)
 # ----------------------------
@@ -205,10 +237,6 @@ class ExplicitSVDBlock(nn.Module):
         self.hidden_size = hf_layer.attn.Wo.in_features
         self.num_heads = cfg.num_attention_heads
         self.head_dim = self.hidden_size // self.num_heads
-
-        # Validate head dimension is power of 2 for Triton FlashAttention
-        if not (self.head_dim > 0 and (self.head_dim & (self.head_dim - 1)) == 0):
-            raise ValueError(f"Head dimension {self.head_dim} must be a power of 2 for FlashAttention Triton kernel")
 
         # Norms
         self.attn_norm = copy.deepcopy(hf_layer.attn_norm)
@@ -273,48 +301,26 @@ class ExplicitSVDBlock(nn.Module):
         q = qf.view(B, H, M, dh)
         k = kf.view(B, H, M, dh)
 
-        # ---- FlashAttention with BMHd layout ----
-        # Convert from BHMD to BMHd layout for FlashAttention
-        q_bmhd = q.transpose(1, 2).contiguous()  # [B,M,H,dh]
-        k_bmhd = k.transpose(1, 2).contiguous()  # [B,M,H,dh]
-        v_bmhd = v.transpose(1, 2).contiguous()  # [B,M,H,dh]
-        
-        # Convert mask to FlashAttention format [B,H,1,M] int32 (1 = keep, 0 = mask)
-        # Priority: sliding_window_mask > attention_mask > default (all ones)
+        # ---- SDPA mask ----
+        sdpa_mask = None
         if sliding_window_mask is not None:
-            # Sliding window mask is 4D additive [B,1/H,M,M] or similar
-            # For FlashAttention, we need to extract the key mask [B,H,1,M]
             sm = sliding_window_mask
-            if sm.dim() == 4 and sm.shape[2] == M and sm.shape[3] == M:
-                # Extract diagonal or first row as key mask approximation
-                # This is a simplification - ideally we'd implement causal masking in the kernel
-                mask_bh1m = (sm[..., 0:1, :] >= 0).to(torch.int32)  # [B,H,1,M]
-                if mask_bh1m.shape[1] == 1:  # Broadcast over heads if needed
-                    mask_bh1m = mask_bh1m.expand(B, H, 1, M)
-                mask_bh1m = mask_bh1m.contiguous()
-            else:
-                # Fallback to default mask
-                mask_bh1m = torch.ones(B, H, 1, M, device=q.device, dtype=torch.int32)
+            if sm.dtype.is_floating_point and sm.dtype != q.dtype:
+                sm = sm.to(q.dtype)
+            sdpa_mask = sm  # additive 4D [B,1/H,M,M]
         elif attention_mask is not None:
             if attention_mask.dim() == 2:
-                # [B,M] padding mask -> [B,H,1,M] int32 (1 = keep, 0 = mask)
-                mask_bh1m = attention_mask.to(torch.int32)[:, None, None, :].expand(B, H, 1, M).contiguous()
-            else:
-                # Assume 4D mask, convert to int32
-                mask_bh1m = (attention_mask >= 0).to(torch.int32)
-                if mask_bh1m.shape[2] != 1:
-                    mask_bh1m = mask_bh1m[:, :, :1, :]
-                mask_bh1m = mask_bh1m.contiguous()
-        else:
-            mask_bh1m = torch.ones(B, H, 1, M, device=q.device, dtype=torch.int32)
+                sdpa_mask = self._padding_mask_bool(attention_mask)  # boolean [B,1,1,M]
+            elif attention_mask.dim() == 4:
+                sm = attention_mask
+                if sm.dtype.is_floating_point and sm.dtype != q.dtype:
+                    sm = sm.to(q.dtype)
+                sdpa_mask = sm
 
-        # FlashAttention Triton kernel
-        attn = flash_attn_triton_flex(
-            q_bmhd, k_bmhd, v_bmhd, mask_bh1m,
-            layout="BMHd", 
-            use_autotune=True
-        )  # Returns [B,H,M,dh]
-        
+        # SDPA on [B,H,M,dh]
+        attn = F.scaled_dot_product_attention(q, k, v, attn_mask=sdpa_mask, dropout_p=0.0)  # [B,H,M,dh]
+        # unfused attention calculation
+        #attn = scaled_dot_product_attention_unfused(q, k, v, attn_mask=sdpa_mask)  # [B,H,M,dh]
         attn = attn.transpose(1, 2).reshape(B, M, D)  # [B,M,D]
         x = x + self.Wo_attn(attn)
 
@@ -441,6 +447,7 @@ class ModernBERT_SVD_Explicit(nn.Module):
         return out
 
 
+
 # ----------------------------
 # Quick sanity harness
 # ----------------------------
@@ -497,8 +504,8 @@ def main():
     print("Device:", device)
 
     # Ranks for compression testing (now using correct head-wise approach)
-    RANK_ATTN = 64   # Full rank per head
-    RANK_FFN  = 768 
+    RANK_ATTN = 56#64   # Full rank per head
+    RANK_FFN  = 512#768
 
     cfg = AutoConfig.from_pretrained(MODE_DIR := MODEL_DIR, trust_remote_code=True)
     cfg._attn_implementation = "sdpa"  # matches our explicit attention path
@@ -536,8 +543,19 @@ def main():
     # Update CACHED_ORIG_MEM to use the clean SVD baseline (like in BERT profile)
     CACHED_ORIG_MEM = persistent_baseline
 
+    # Test baseline dense model accuracy (create a separate correct baseline model)
+    from run_modernbert import CustomModernBERT
+    baseline_dense = AutoModelForSequenceClassification.from_pretrained(MODE_DIR, config=cfg, trust_remote_code=True).to(device).eval()
+    custom_dense = CustomModernBERT(baseline_dense).to(device).eval()
+    baseline_acc = quick_check(custom_dense, loader, device)
+    print(f"[Baseline] Dense model accuracy on 3 batches: {baseline_acc:.4f}")
+    
     acc = quick_check(svd, loader, device)
     print(f"[Sanity] SVD-explicit model accuracy on 3 batches: {acc:.4f}")
+    
+    # Test full baseline dense model accuracy
+    dense_full_acc, _, _ = acc_peak_time(custom_dense, loader, device, use_mask=True)
+    print(f"[Baseline] Dense model FULL validation accuracy: {dense_full_acc:.4f}")
     
     # Comprehensive memory and latency measurement (entire validation split)
     full_acc, peak_lr, latency_ms = acc_peak_time(svd, loader, device, use_mask=True)

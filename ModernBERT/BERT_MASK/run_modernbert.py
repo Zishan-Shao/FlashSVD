@@ -247,7 +247,7 @@ def main():
 
     dense = AutoModelForSequenceClassification.from_pretrained(MODEL_DIR, config=cfg, trust_remote_code=True).to(device).eval()
     tok = AutoTokenizer.from_pretrained(MODEL_DIR, trust_remote_code=True)
-    loader = _build_loader(tok, seq_len=128*8, batch_size=32)
+    loader = _build_loader(tok, seq_len=128*4, batch_size=64)
 
     # Clean memory and measure baseline (original dense model)
     torch.cuda.empty_cache()

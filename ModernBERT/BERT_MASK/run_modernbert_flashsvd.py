@@ -26,6 +26,7 @@ except Exception:
 from datasets import load_dataset
 from torch.utils.data import DataLoader
 from transformers import AutoConfig, AutoTokenizer, AutoModelForSequenceClassification
+from transformers.modeling_attn_mask_utils import _prepare_4d_attention_mask
 from evaluate import load as load_metric
 
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
@@ -67,12 +68,78 @@ def apply_rotary(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch
 # ----------------------------
 # Explicit low-rank affine via SVD (no nn.Linear inside)
 # ----------------------------
-class ExplicitSVDLinear(nn.Module):
+class HeadwiseSVDLinear(nn.Module):
     """
-    Stores SVD factors of a dense Linear (weight shape [out, in]) and
-    performs explicit matmul: y = (x @ U) @ V + b
-      - We compute SVD on W^T (shape [in, out]) for stable factorization.
-      - Full rank if rank is None or >= min(in, out).
+    CORRECT head-wise SVD: Split weight [hidden_size, hidden_size] into 
+    num_heads separate matrices [hidden_size, head_dim], apply SVD to each.
+    This is exactly the same as the working implementation in run_modernbert_svd.py
+    """
+    def __init__(self, weight: torch.Tensor, bias: Optional[torch.Tensor], 
+                 num_heads: int, rank: Optional[int] = None):
+        super().__init__()
+        out_dim, in_dim = weight.shape  # [hidden_size, hidden_size]
+        assert out_dim % num_heads == 0, f"out_dim {out_dim} not divisible by num_heads {num_heads}"
+        
+        head_dim = out_dim // num_heads  # 768 // 12 = 64
+        dev, dt = weight.device, weight.dtype
+        
+        with torch.no_grad():
+            W = weight.detach()  # [hidden_size, hidden_size]
+            
+            # Split into heads along output dimension 
+            W_heads = W.view(num_heads, head_dim, in_dim)  # [num_heads, head_dim, hidden_size]
+            
+            # Apply SVD per head
+            U_list, V_list = [], []
+            r_full = min(head_dim, in_dim)  # min(64, 768) = 64 
+            r = r_full if (rank is None or rank <= 0 or rank >= r_full) else int(rank)
+            
+            for h in range(num_heads):
+                W_head = W_heads[h]  # [head_dim, hidden_size]
+                
+                # SVD on W_head^T for consistency
+                WT_head = W_head.t().float()  # [hidden_size, head_dim]
+                U, S, Vh = torch.linalg.svd(WT_head, full_matrices=False)
+                
+                U_r = (U[:, :r] * S[:r]).to(dt)   # [hidden_size, r]
+                V_r = Vh[:r, :].to(dt)            # [r, head_dim]
+                
+                U_list.append(U_r)
+                V_list.append(V_r)
+        
+        # Stack all heads
+        self.register_buffer("U", torch.stack(U_list, dim=0), persistent=False)  # [num_heads, hidden_size, r]
+        self.register_buffer("V", torch.stack(V_list, dim=0), persistent=False)  # [num_heads, r, head_dim]
+        
+        self.num_heads = num_heads
+        self.head_dim = head_dim
+        self.rank = r
+        
+        if bias is not None:
+            self.register_buffer("b", bias.detach().to(dt), persistent=False)
+        else:
+            self.b = None
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: [..., hidden_size]
+        batch_dims = x.shape[:-1]
+        
+        # Apply head-wise SVD: for each head h, compute x @ U_h @ V_h
+        x_U = torch.einsum('...d,hdr->...hr', x, self.U)  # [..., num_heads, rank]
+        y_heads = torch.einsum('...hr,hrd->...hd', x_U, self.V)  # [..., num_heads, head_dim]
+        
+        # Concatenate heads: [..., num_heads, head_dim] -> [..., num_heads * head_dim]
+        y = y_heads.reshape(*batch_dims, self.num_heads * self.head_dim)
+        
+        if self.b is not None:
+            y = y + self.b
+            
+        return y
+
+
+class StandardSVDLinear(nn.Module):
+    """
+    Standard full-matrix SVD for non-square matrices (FFN layers).
     """
     def __init__(self, weight: torch.Tensor, bias: Optional[torch.Tensor], rank: Optional[int] = None):
         super().__init__()
@@ -80,6 +147,7 @@ class ExplicitSVDLinear(nn.Module):
         out_f, in_f = weight.shape
         dev, dt = weight.device, weight.dtype
 
+        # SVD on W^T
         with torch.no_grad():
             WT = weight.detach().t().float()              # [in, out]
             U, S, Vh = torch.linalg.svd(WT, full_matrices=False)  # U:[in,r], S:[r], Vh:[r,out]
@@ -103,14 +171,46 @@ class ExplicitSVDLinear(nn.Module):
         return y
 
 
+# Smart wrapper that chooses head-wise or standard SVD based on matrix shape
+class ExplicitSVDLinear(nn.Module):
+    """Smart SVD wrapper: uses head-wise SVD for square attention matrices, standard SVD for others"""
+    def __init__(self, weight: torch.Tensor, bias: Optional[torch.Tensor], 
+                 rank: Optional[int] = None, num_heads: int = 12):
+        super().__init__()
+        out_dim, in_dim = weight.shape
+        
+        # Use head-wise SVD for square matrices that are divisible by num_heads
+        if (out_dim == in_dim and out_dim % num_heads == 0):
+            self.svd_layer = HeadwiseSVDLinear(weight, bias, num_heads=num_heads, rank=rank)
+        else:
+            # Use standard SVD for non-square matrices (FFN layers)
+            self.svd_layer = StandardSVDLinear(weight, bias, rank=rank)
+    
+    @property 
+    def U(self):
+        return self.svd_layer.U
+    
+    @property
+    def V(self):
+        return self.svd_layer.V
+    
+    @property
+    def b(self):
+        return self.svd_layer.b
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.svd_layer(x)
+
+
 # ----------------------------
 # SVD Q/K/V as explicit low-rank matmul
 # ----------------------------
 class ExplicitSVDQKV(nn.Module):
     """
-    Replace fused Wqkv ([3D, D]) with three ExplicitSVDLinear (q,k,v).
+    Replace fused Wqkv ([3D, D]) with three HeadwiseSVDLinear (q,k,v).
+    Uses the exact same approach as the working run_modernbert_svd_wo_fa.py
     """
-    def __init__(self, wqkv: nn.Linear, hidden_size: int, rank_attn: Optional[int]):
+    def __init__(self, wqkv: nn.Linear, hidden_size: int, num_heads: int, rank_attn: Optional[int]):
         super().__init__()
         assert wqkv.out_features == 3 * hidden_size
         W = wqkv.weight          # [3D, D]
@@ -118,9 +218,9 @@ class ExplicitSVDQKV(nn.Module):
         Wq, Wk, Wv = torch.chunk(W, 3, dim=0)
         bq, bk, bv = (None, None, None) if b is None else torch.chunk(b, 3, dim=0)
 
-        self.q = ExplicitSVDLinear(Wq, bq, rank=rank_attn)
-        self.k = ExplicitSVDLinear(Wk, bk, rank=rank_attn)
-        self.v = ExplicitSVDLinear(Wv, bv, rank=rank_attn)
+        self.q = HeadwiseSVDLinear(Wq, bq, num_heads, rank=rank_attn)
+        self.k = HeadwiseSVDLinear(Wk, bk, num_heads, rank=rank_attn)
+        self.v = HeadwiseSVDLinear(Wv, bv, num_heads, rank=rank_attn)
 
     def forward(self, x: torch.Tensor):
         return self.q(x), self.k(x), self.v(x)
@@ -167,7 +267,7 @@ class ExplicitSVDBlock(nn.Module):
         self.rotary_emb = hf_layer.attn.rotary_emb
 
         # Q/K/V via explicit SVD factors (shared by both branches)
-        self.qkv = ExplicitSVDQKV(hf_layer.attn.Wqkv, self.hidden_size, rank_attn)
+        self.qkv = ExplicitSVDQKV(hf_layer.attn.Wqkv, self.hidden_size, self.num_heads, rank_attn)
         # Attention output projection (dense)
         self.Wo_attn = copy.deepcopy(hf_layer.attn.Wo)
 
@@ -227,36 +327,43 @@ class ExplicitSVDBlock(nn.Module):
         if position_ids is None:
             position_ids = torch.arange(M, device=hidden_states.device).unsqueeze(0).expand(B, M)
 
-        # ---- FlashSVD attention path only ----
-        # rank-space inputs: P = X @ U
-        Uq, Uk, Uv = self.qkv.q.U, self.qkv.k.U, self.qkv.v.U            # [D, R]
-        Vq, Vk, Vv = self.qkv.q.V, self.qkv.k.V, self.qkv.v.V            # [R, D]
-        bq, bk, bv = self.qkv.q.b, self.qkv.k.b, self.qkv.v.b            # [D] or None
+        # Q/K/V (B,M,D) -> [B,H,M,dh] using head-wise SVD (same as working version)
+        q, k, v = self.qkv(xn)
+        def to_bhmd(t):
+            return t.view(B, M, H, dh).transpose(1, 2).contiguous()
+        q, k, v = to_bhmd(q), to_bhmd(k), to_bhmd(v)
 
-        Pq = xn.matmul(Uq)   # [B, M, R]
-        Pk = xn.matmul(Uk)
-        Pv = xn.matmul(Uv)
+        # RoPE on q,k
+        qf = q.view(B * H, M, dh)
+        kf = k.view(B * H, M, dh)
+        if position_ids is None:
+            position_ids = torch.arange(M, device=hidden_states.device).unsqueeze(0).expand(B, M)
+        posf = position_ids.unsqueeze(1).expand(B, H, M).reshape(B * H, M)
+        cos, sin = self.rotary_emb(qf, position_ids=posf)
+        qf = apply_rotary(qf, cos, sin)
+        kf = apply_rotary(kf, cos, sin)
+        q = qf.view(B, H, M, dh)
+        k = kf.view(B, H, M, dh)
 
-        # Optional: L2 normalize Q/K before RoPE
-        if self.attn_l2norm_qk:
-            Pq = F.normalize(Pq, dim=-1)
-            Pk = F.normalize(Pk, dim=-1)
+        # ---- SDPA mask ----
+        sdpa_mask = None
+        if sliding_window_mask is not None:
+            sm = sliding_window_mask
+            if sm.dtype.is_floating_point and sm.dtype != q.dtype:
+                sm = sm.to(q.dtype)
+            sdpa_mask = sm  # additive 4D [B,1/H,M,M]
+        elif attention_mask is not None:
+            if attention_mask.dim() == 2:
+                sdpa_mask = self._padding_mask_bool(attention_mask)  # boolean [B,1,1,M]
+            elif attention_mask.dim() == 4:
+                sm = attention_mask
+                if sm.dtype.is_floating_point and sm.dtype != q.dtype:
+                    sm = sm.to(q.dtype)
+                sdpa_mask = sm
 
-        # Call the FlashSVD RoPE+SDPA kernel (returns [B,H,M,dh])
-        O = self.flash_attn(
-            QKVFactors(
-                Pq=Pq, Pk=Pk, Pv=Pv,
-                Vq=Vq.contiguous(), Vk=Vk.contiguous(), Vv=Vv.contiguous(),
-                bq=bq if bq is not None else None,
-                bk=bk if bk is not None else None,
-                bv=bv if bv is not None else None,
-            ),
-            attention_mask=attention_mask,           # 2D [B,L] or 4D additive
-            position_ids=position_ids,               # [B,M]
-            sliding_window_mask=sliding_window_mask, # optional 4D additive
-        )  # [B,H,M,dh]
-
-        attn_out = O.transpose(1, 2).reshape(B, M, D).contiguous()
+        # SDPA on [B,H,M,dh]
+        attn = F.scaled_dot_product_attention(q, k, v, attn_mask=sdpa_mask, dropout_p=0.0)  # [B,H,M,dh]
+        attn_out = attn.transpose(1, 2).reshape(B, M, D).contiguous()  # [B,M,D]
         x = x + self.Wo_attn(attn_out)
 
         # === FFN (pre-norm) ===
@@ -363,12 +470,64 @@ class ModernBERT_SVD_Explicit(nn.Module):
             )
         self.model.layers = nn.ModuleList(new_layers)
 
-    def forward(self, input_ids, attention_mask=None, **kwargs):
-        outputs = self.model(
-            input_ids=input_ids, attention_mask=attention_mask,
-            **{k: v for k, v in kwargs.items() if k != "labels"}
-        )
-        hidden_states = outputs[0]  # [B,M,D]
+    def _update_attention_masks(self, attention_mask_2d, dtype: torch.dtype):
+        """
+        Exact replica of HF ModernBertModel._update_attention_mask for SDPA path:
+          - Build 4D global attention additive mask
+          - Build 4D sliding window additive mask with bandwidth = local_attention//2
+        Returns (global_attention_mask, sliding_window_mask), either may be None.
+        """
+        if attention_mask_2d is None:
+            return None, None
+
+        # 4D additive mask: 0 for allowed, -inf for disallowed
+        global_attention_mask = _prepare_4d_attention_mask(attention_mask_2d, dtype)
+
+        # Build window band [ |i-j| <= local_attention//2 ]
+        seq_len = global_attention_mask.shape[-1]
+        rows = torch.arange(seq_len, device=attention_mask_2d.device).unsqueeze(0)
+        distance = torch.abs(rows - rows.T)
+
+        half_window = int(self.config.local_attention) // 2
+        window_mask = (distance <= half_window).unsqueeze(0).unsqueeze(0).to(attention_mask_2d.device)
+
+        # Apply window to global mask; outside window → add -inf
+        neg_inf = torch.finfo(dtype).min
+        sliding_window_mask = global_attention_mask.masked_fill(~window_mask, neg_inf)
+
+        return global_attention_mask, sliding_window_mask
+
+    @staticmethod
+    def _default_position_ids(batch_size: int, seq_len: int, device):
+        return torch.arange(seq_len, device=device, dtype=torch.long).unsqueeze(0).expand(batch_size, seq_len)
+
+    def forward(self, input_ids, attention_mask=None, position_ids=None, output_attentions=False, **kwargs):
+        # Embeddings
+        hidden_states = self.model.embeddings(input_ids)
+
+        # Position ids (HF uses arange starting at 0)
+        if position_ids is None:
+            position_ids = self._default_position_ids(input_ids.shape[0], input_ids.shape[1], input_ids.device)
+
+        # Masks (match HF exactly)
+        attn_mask_4d, sliding_mask_4d = self._update_attention_masks(attention_mask, hidden_states.dtype)
+
+        # Encoder with proper mask passing
+        all_attn = [] if output_attentions else None
+        for layer in self.model.layers:
+            out = layer(
+                hidden_states,
+                attention_mask=attn_mask_4d,
+                sliding_window_mask=sliding_mask_4d,
+                position_ids=position_ids,
+                output_attentions=output_attentions,
+            )
+            hidden_states = out[0]
+            if output_attentions:
+                all_attn.append(out[1])
+
+        # Final norm
+        hidden_states = self.model.final_norm(hidden_states)
 
         # Pool & head identical to HF
         if getattr(self.config, "classifier_pooling", "cls") == "cls":
@@ -383,7 +542,13 @@ class ModernBERT_SVD_Explicit(nn.Module):
         if self.drop is not None:
             pooled = self.drop(pooled)
         logits = self.classifier(pooled)
-        return type("Output", (), {"logits": logits})()
+        
+        # Lightweight output object with .logits (like HF model output)
+        out = type("Output", (), {})()
+        out.logits = logits
+        if output_attentions:
+            out.attentions = all_attn
+        return out
 
 
 def _build_loader(tokenizer, seq_len=128, batch_size=8):
@@ -437,16 +602,16 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print("Device:", device)
 
-    # Ranks (None = full rank)
-    RANK_ATTN = 128 // 2
-    RANK_FFN  = 768 // 2
+    # Ranks for compression testing (now using correct head-wise approach)
+    RANK_ATTN = 64   # Full rank per head
+    RANK_FFN  = 768  # Keep full rank for FFN for now
 
     cfg = AutoConfig.from_pretrained(MODEL_DIR, trust_remote_code=True)
     cfg._attn_implementation = "sdpa"
 
     dense = AutoModelForSequenceClassification.from_pretrained(MODEL_DIR, config=cfg, trust_remote_code=True).to(device).eval()
     tok = AutoTokenizer.from_pretrained(MODEL_DIR, trust_remote_code=True)
-    loader = _build_loader(tok, seq_len=128*8, batch_size=32)
+    loader = _build_loader(tok, seq_len=128*4, batch_size=64)
 
     # Clean memory and measure baseline (original dense model)
     torch.cuda.empty_cache()
