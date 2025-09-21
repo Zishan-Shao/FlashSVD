@@ -1,24 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-profile_svd_kv.py
-Per-head low-rank SVD factorization for GPT-2 with correctness checks, profiling, and KV cache.
+profile_svd_linear.py
+Per-head low-rank SVD factorization for GPT-2 with correctness checks and profiling.
 
-- Q,K,V per head low-rank:
-    U:[D,H,r], V:[H,r,dh], b:[H,dh]
-- Out projection low-rank
-- MLP (c_fc, c_proj) low-rank
-- Dense KV cache: returns present=(K,V) with shape [B,H,T,dh]
-- Optional factor save/load
+- Q,K,V per head: U:[D,H,r], V:[H,r,dh], b:[H,dh]
+- Out proj low-rank
+- FFN (c_fc, c_proj) low-rank
+- Optional factor save/load (no SVD at runtime if loaded)
 - Q/K/V intermediate comparison + end-to-end validation vs dense
 - Perplexity + peak memory + latency on Wikitext-2
 
 Usage:
-  python3 profile_svd_kv.py --rank-ratio-attn 1.0 --rank-ratio-mlp 1.0 --validate --debug-attn
+  python3 profile_svd_linear.py --rank-ratio-attn 1.0 --rank-ratio-mlp 1.0 --validate --debug-attn
 """
 
-import os, math, time, itertools, argparse
-from typing import Optional, Dict, Tuple
+import os, sys, math, json, time, itertools, argparse
+from typing import Optional, Dict, Any, Tuple
 
 import torch
 import torch.nn as nn
@@ -62,23 +60,17 @@ def svd_factor(W: torch.Tensor, rank: int) -> Tuple[torch.Tensor, torch.Tensor]:
     V_r = (S[:r, None] * Vh[:r, :]).contiguous()   # [r, N]
     return U_r, V_r
 
-def make_causal_slice_mask(s_new: int, total_len: int, device, dtype=torch.bool) -> torch.Tensor:
-    """
-    Build a causal mask for the last s_new rows over total_len columns.
-    Returns [s_new, total_len] boolean (True = allowed).
-    """
-    # Full lower-triangular then take the last s_new rows
-    full = torch.ones(total_len, total_len, dtype=dtype, device=device).tril_()
-    return full[-s_new:, :].contiguous()
+def make_causal_mask(S: int, device, dtype=torch.bool) -> torch.Tensor:
+    return torch.ones(S, S, dtype=dtype, device=device).tril_()
 
 def as_linear_weight(W_raw: torch.Tensor, in_dim: int, out_dim: int) -> torch.Tensor:
     """
-    Normalize a weight tensor to 'linear' form used as x @ W_lin (+ b),
+    Normalize a weight tensor to the 'linear form' used as x @ W_lin (+ b),
     i.e., W_lin has shape [in_dim, out_dim].
 
     Accepts either storage layout:
-      - [out_dim, in_dim] (HF Conv1D / Linear default) -> returns W_raw.t()
-      - [in_dim, out_dim] -> returns W_raw
+      - [out_dim, in_dim] (Conv1D/Linear weight) -> returns W_raw.t()
+      - [in_dim, out_dim] (column-major style)   -> returns W_raw
     """
     if W_raw.shape == (in_dim, out_dim):
         return W_raw.contiguous()
@@ -88,7 +80,7 @@ def as_linear_weight(W_raw: torch.Tensor, in_dim: int, out_dim: int) -> torch.Te
 
 
 # =========================
-# Low-rank GPT-2 Block with dense KV cache
+# Low-rank GPT-2 Block
 # =========================
 class LowRankSVDBlock(nn.Module):
     """
@@ -97,7 +89,7 @@ class LowRankSVDBlock(nn.Module):
       - out:   Uo:[D,ro], Vo:[ro,D], bo:[D]
       - FFN:   fc1 (W1_lin:[D,I]): U1:[D,r1], V1:[r1,I], b1:[I]
                fc2 (W2_lin:[I,D]): U2:[I,r2], V2:[r2,D], b2:[D]
-    Dense KV cache: returns present=(K_cat, V_cat) of shape [B,H,T,dh]
+    where D=hidden_size, H=num_heads, dh=D//H, I=intermediate size.
     """
     def __init__(
         self,
@@ -112,37 +104,41 @@ class LowRankSVDBlock(nn.Module):
         self.ln1 = hf_layer.ln_1
         self.ln2 = hf_layer.ln_2
 
-        D = attn.embed_dim
+        # Derive dims from the attention module
+        D_cfg = attn.embed_dim
         H = attn.num_heads
-        if D % H != 0:
-            raise ValueError(f"[LowRankSVDBlock] embed_dim={D} not divisible by heads={H}")
-        dh = D // H
+        if D_cfg % H != 0:
+            raise ValueError(f"[LowRankSVDBlock] embed_dim={D_cfg} not divisible by heads={H}")
+        dh = D_cfg // H
 
-        self.D, self.H, self.dh = D, H, dh
+        self.D, self.H, self.dh = D_cfg, H, dh
         self.scale = 1.0 / math.sqrt(dh)
 
+        # Robust device/dtype anchor
         dev = next(hf_layer.parameters()).device
         ptdtype = next(hf_layer.parameters()).dtype
 
         # ---------- ATTENTION (Q,K,V) ----------
-        Wc_lin = as_linear_weight(hf_layer.attn.c_attn.weight.data, in_dim=D, out_dim=3 * D)  # [D,3D]
+        # Normalize to linear weight Wc_lin:[D, 3D]
+        Wc_raw = hf_layer.attn.c_attn.weight.data
         bc = hf_layer.attn.c_attn.bias.data.clone().to(device=dev, dtype=ptdtype)
+        Wc_lin = as_linear_weight(Wc_raw, in_dim=self.D, out_dim=3 * self.D)  # [D,3D]
 
-        # Split into [D,D], reshape to [D,H,dh]
-        q_w = Wc_lin[:, :D].contiguous().view(D, H, dh)
-        k_w = Wc_lin[:, D:2*D].contiguous().view(D, H, dh)
-        v_w = Wc_lin[:, 2*D:3*D].contiguous().view(D, H, dh)
+        # Split to [D,D] each, and reshape to [D,H,dh]
+        q_w = Wc_lin[:, :self.D].contiguous().view(self.D, self.H, dh)
+        k_w = Wc_lin[:, self.D:2*self.D].contiguous().view(self.D, self.H, dh)
+        v_w = Wc_lin[:, 2*self.D:3*self.D].contiguous().view(self.D, self.H, dh)
 
-        q_b = bc[:D].view(H, dh).contiguous()
-        k_b = bc[D:2*D].view(H, dh).contiguous()
-        v_b = bc[2*D:3*D].view(H, dh).contiguous()
+        q_b = bc[:self.D].view(self.H, dh).contiguous()
+        k_b = bc[self.D:2*self.D].view(self.H, dh).contiguous()
+        v_b = bc[2*self.D:3*self.D].view(self.H, dh).contiguous()
 
-        r_attn = max(1, int(rank_ratio_attn * min(D, dh)))
+        r_attn = max(1, int(rank_ratio_attn * min(self.D, dh)))
 
-        # Allocate factors
+        # Alloc parameters
         def alloc_uv(name: str):
-            U = nn.Parameter(torch.empty(D, H, r_attn, device=dev, dtype=ptdtype))
-            V = nn.Parameter(torch.empty(H, r_attn, dh, device=dev, dtype=ptdtype))
+            U = nn.Parameter(torch.empty(self.D, self.H, r_attn, device=dev, dtype=ptdtype))
+            V = nn.Parameter(torch.empty(self.H, r_attn, dh, device=dev, dtype=ptdtype))
             self.register_parameter(f"{name}_U", U)
             self.register_parameter(f"{name}_V", V)
             return U, V
@@ -155,16 +151,16 @@ class LowRankSVDBlock(nn.Module):
         self.k_b = nn.Parameter(k_b.to(device=dev, dtype=ptdtype))
         self.v_b = nn.Parameter(v_b.to(device=dev, dtype=ptdtype))
 
-        # Initialize factors (per-head SVD) or preload
+        # Initialize factors
         if preload_factors is None:
             with torch.no_grad():
                 for name, W_h in (("q", q_w), ("k", k_w), ("v", v_w)):
                     U_param = getattr(self, f"{name}_U")
                     V_param = getattr(self, f"{name}_V")
                     Us, Vs = [], []
-                    for h in range(H):
+                    for h in range(self.H):
                         Wh = W_h[:, h, :]                # [D, dh]
-                        Uh, Vh = svd_factor(Wh, r_attn)  # [D,r], [r,dh]
+                        Uh, Vh = svd_factor(Wh, r_attn)  # Uh:[D,r], Vh:[r,dh]
                         Us.append(Uh.to(device=dev, dtype=ptdtype))
                         Vs.append(Vh.to(device=dev, dtype=ptdtype))
                     U = torch.stack(Us, dim=1)           # [D,H,r]
@@ -175,31 +171,40 @@ class LowRankSVDBlock(nn.Module):
             self.load_factors_(preload_factors)
 
         # ---------- OUT PROJ ----------
-        W_out_lin = as_linear_weight(hf_layer.attn.c_proj.weight.data, in_dim=D, out_dim=D)  # [D,D]
+        # Normalize to linear W_out_lin:[D,D] (used as Y @ W_out_lin + b)
+        W_out_raw = hf_layer.attn.c_proj.weight.data
+        W_out_lin = as_linear_weight(W_out_raw, in_dim=self.D, out_dim=self.D)  # [D,D]
         b_out = hf_layer.attn.c_proj.bias.data.clone().to(device=dev, dtype=ptdtype)
-        r_out = max(1, int(rank_ratio_attn * min(W_out_lin.shape)))
-        Uo, Vo = svd_factor(W_out_lin, r_out)  # [D,r], [r,D]
+
+        r_out = max(1, int(rank_ratio_attn * min(W_out_lin.shape)))  # == int(rank_ratio_attn * D)
+        Uo, Vo = svd_factor(W_out_lin, r_out)  # Uo:[D,r], Vo:[r,D]
+
         self.out_U = nn.Parameter(Uo.to(device=dev, dtype=ptdtype))
         self.out_V = nn.Parameter(Vo.to(device=dev, dtype=ptdtype))
         self.out_b = nn.Parameter(b_out)
 
         # ---------- MLP ----------
-        I = hf_layer.mlp.c_fc.bias.data.numel()  # robust intermediate size
+        # Use bias size to infer I robustly
+        I = hf_layer.mlp.c_fc.bias.data.numel()  # 4*D typically
 
-        # FC1: W1_lin:[D,I]
-        W1_lin = as_linear_weight(hf_layer.mlp.c_fc.weight.data, in_dim=D, out_dim=I)
+        # FC1: z:[B,S,D], W1_lin:[D,I]  => z @ W1_lin + b1
+        W1_raw = hf_layer.mlp.c_fc.weight.data
+        W1_lin = as_linear_weight(W1_raw, in_dim=self.D, out_dim=I)  # [D,I]
         b_fc1 = hf_layer.mlp.c_fc.bias.data.clone().to(device=dev, dtype=ptdtype)
-        r_fc1 = max(1, int(rank_ratio_mlp * min(W1_lin.shape)))
-        U1, V1 = svd_factor(W1_lin, r_fc1)  # [D,r1], [r1,I]
+
+        r_fc1 = max(1, int(rank_ratio_mlp * min(W1_lin.shape)))  # min(D,I)
+        U1, V1 = svd_factor(W1_lin, r_fc1)  # U1:[D,r1], V1:[r1,I]
         self.fc1_U = nn.Parameter(U1.to(device=dev, dtype=ptdtype))
         self.fc1_V = nn.Parameter(V1.to(device=dev, dtype=ptdtype))
         self.fc1_b = nn.Parameter(b_fc1)
 
-        # FC2: W2_lin:[I,D]
-        W2_lin = as_linear_weight(hf_layer.mlp.c_proj.weight.data, in_dim=I, out_dim=D)
+        # FC2: h1:[B,S,I], W2_lin:[I,D] => h1 @ W2_lin + b2
+        W2_raw = hf_layer.mlp.c_proj.weight.data
+        W2_lin = as_linear_weight(W2_raw, in_dim=I, out_dim=self.D)  # [I,D]
         b_fc2 = hf_layer.mlp.c_proj.bias.data.clone().to(device=dev, dtype=ptdtype)
-        r_fc2 = max(1, int(rank_ratio_mlp * min(W2_lin.shape)))
-        U2, V2 = svd_factor(W2_lin, r_fc2)  # [I,r2], [r2,D]
+
+        r_fc2 = max(1, int(rank_ratio_mlp * min(W2_lin.shape)))  # min(I,D)
+        U2, V2 = svd_factor(W2_lin, r_fc2)  # U2:[I,r2], V2:[r2,D]
         self.fc2_U = nn.Parameter(U2.to(device=dev, dtype=ptdtype))
         self.fc2_V = nn.Parameter(V2.to(device=dev, dtype=ptdtype))
         self.fc2_b = nn.Parameter(b_fc2)
@@ -237,117 +242,59 @@ class LowRankSVDBlock(nn.Module):
                 p.copy_(tensors[k].to(dtype=p.dtype, device=p.device))
 
     # ---------------------
-    # Forward (+ dense KV cache)
+    # Forward
     # ---------------------
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        layer_past: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
-        use_cache: bool = False,
-        output_attentions: bool = False,
-        **kwargs,
-    ):
-        """
-        Inputs:
-          hidden_states: [B,S,D]
-          attention_mask:
-            - None
-            - boolean [B,S_total] or [B,1,1,S_total]
-            - additive float [B,1,1,S_total] (0 for keep, -inf for mask) as in HF
-          layer_past: (past_k, past_v) each [B,H,T_past, dh]
-          use_cache: if True, returns present=(K_cat, V_cat)
-        """
+    def forward(self, hidden_states, attention_mask=None, **kwargs):
         B, S, D = hidden_states.shape  # D == self.D
-        dev = hidden_states.device
-        neg_inf = torch.finfo(hidden_states.dtype).min
 
-        # LN1 + QKV from low-rank
+        # LN1
         x = self.ln1(hidden_states)  # [B,S,D]
 
-        # Q = X @ (Uq@Vq)  => [B,H,S,dh]
+        # Q,K,V via low-rank per-head
+        # Q = X @ (Uq@Vq)  => einsum('b s d, d h r, h r e -> b h s e')
         Q = torch.einsum('bsd,dhr,hre->bhse', x, self.q_U, self.q_V) + self.q_b[None, :, None, :]
         K = torch.einsum('bsd,dhr,hre->bhse', x, self.k_U, self.k_V) + self.k_b[None, :, None, :]
         V = torch.einsum('bsd,dhr,hre->bhse', x, self.v_U, self.v_V) + self.v_b[None, :, None, :]
 
-        # Concatenate with past if provided
-        if layer_past is not None:
-            past_k, past_v = layer_past  # [B,H,T_p,dh]
-            # Safety: ensure dtype/device align
-            if past_k.dtype != K.dtype:
-                past_k = past_k.to(dtype=K.dtype)
-            if past_v.dtype != V.dtype:
-                past_v = past_v.to(dtype=V.dtype)
-            K_cat = torch.cat([past_k, K], dim=2)  # [B,H,T_p+S,dh]
-            V_cat = torch.cat([past_v, V], dim=2)
-            past_len = past_k.size(2)
-        else:
-            K_cat, V_cat = K, V
-            past_len = 0
+        # Attention
+        attn_scores = torch.matmul(Q, K.transpose(-2, -1)) * self.scale  # [B,H,S,S]
 
-        total_len = past_len + S  # K/V sequence length
+        # causal mask
+        causal = make_causal_mask(S, device=attn_scores.device)
+        attn_scores = attn_scores.masked_fill(~causal, float('-inf'))
 
-        # Attention scores: [B,H,S,total_len]
-        attn_scores = torch.matmul(Q, K_cat.transpose(-2, -1)) * self.scale
-
-        # Causal mask for last S rows
-        causal = make_causal_slice_mask(S, total_len, device=dev, dtype=torch.bool)  # [S,total_len]
-        attn_scores = attn_scores.masked_fill(~causal[None, None, :, :], neg_inf)
-
-        # External mask
+        # external mask (expects 1 for tokens to keep)
         if attention_mask is not None:
-            # Expect additive mask [B,1,1,total_len] from HF, but be robust to variants
-            if attention_mask.dim() == 4:
-                am = attention_mask[..., -total_len:]  # [B,1,1,total_len]
-                # If float: additive mask (0 or -inf); if bool: convert to additive
-                if am.dtype in (torch.float16, torch.float32, torch.float64, torch.bfloat16):
-                    attn_scores = attn_scores + am.to(dtype=attn_scores.dtype)
-                else:
-                    key_keep = am.bool()
-                    attn_scores = attn_scores.masked_fill(~key_keep, neg_inf)
-            elif attention_mask.dim() == 2:
-                # [B, L]; allow L == total_len or L == S (pad ones for past)
-                if attention_mask.size(-1) == total_len:
-                    key_keep = attention_mask[:, None, None, :].bool()
-                elif attention_mask.size(-1) == S:
-                    pad = torch.ones(B, past_len, dtype=attention_mask.dtype, device=dev)
-                    key_keep = torch.cat([pad, attention_mask], dim=-1)[:, None, None, :].bool()
-                else:
-                    # fallback: assume keep everything
-                    key_keep = torch.ones(B, 1, 1, total_len, dtype=torch.bool, device=dev)
-                attn_scores = attn_scores.masked_fill(~key_keep, neg_inf)
-            else:
-                # Unknown shape -> ignore
-                pass
+            if attention_mask.dim() == 2:          # [B,S]
+                am = attention_mask[:, None, None, :].bool()
+            else:                                   # already broadcasted
+                am = attention_mask.bool()
+                if am.shape[-2] == 1:
+                    am = am.expand(-1, -1, S, -1)
+            attn_scores = attn_scores.masked_fill(~am, float('-inf'))
 
-        attn_probs = F.softmax(attn_scores, dim=-1)  # [B,H,S,total_len]
-        Y = torch.matmul(attn_probs, V_cat)          # [B,H,S,dh]
-        Y = Y.transpose(1, 2).contiguous().view(B, S, self.D)  # [B,S,D]
+        attn_probs = F.softmax(attn_scores, dim=-1)
+        Y = torch.matmul(attn_probs, V)                             # [B,H,S,dh]
+        Y = Y.transpose(1, 2).contiguous().view(B, S, self.D)       # [B,S,D]
 
-        # Out projection: Y @ (Uo@Vo)
+        # Out proj: Y @ (Uo@Vo)
         Y = torch.matmul(torch.matmul(Y, self.out_U), self.out_V) + self.out_b
         hidden_states = hidden_states + Y
 
         # MLP
         z = self.ln2(hidden_states)   # [B,S,D]
+
+        # fc1: W1_lin ≈ U1@V1 with U1:[D,r1], V1:[r1,I]
         t1 = torch.matmul(z, self.fc1_U)                 # [B,S,r1]
         h1 = torch.matmul(t1, self.fc1_V) + self.fc1_b   # [B,S,I]
         h1 = F.gelu(h1)
+
+        # fc2: W2_lin ≈ U2@V2 with U2:[I,r2], V2:[r2,D]
         t2 = torch.matmul(h1, self.fc2_U)                # [B,S,r2]
         h2 = torch.matmul(t2, self.fc2_V) + self.fc2_b   # [B,S,D]
+
         hidden_states = hidden_states + h2
-
-        outputs = (hidden_states,)
-
-        # present (dense K/V)
-        if use_cache:
-            outputs = outputs + ((K_cat, V_cat),)
-
-        # optional attn probs (HF returns softmaxed weights)
-        if output_attentions:
-            outputs = outputs + (attn_probs,)
-
-        return outputs
+        return (hidden_states,)
 
 
 # =========================
@@ -358,7 +305,6 @@ class LayerShim(nn.Module):
         super().__init__()
         self.block = block
     def forward(self, hidden_states, attention_mask=None, *args, **kwargs):
-        # Pass through all kwargs (layer_past, use_cache, output_attentions, etc.)
         return self.block(hidden_states, attention_mask, **kwargs)
 
 
@@ -373,7 +319,7 @@ def build_svd_model(
     device: Optional[str] = None,
 ) -> GPT2LMHeadModel:
     model = GPT2LMHeadModel.from_pretrained("gpt2")
-    # Leave config.use_cache as-is; we will pass use_cache explicitly in calls
+    model.config.use_cache = False
     model.eval()
     if device:
         model = model.to(device)
@@ -413,11 +359,12 @@ def compare_qkv_intermediate(dense_block: nn.Module, svd_block: LowRankSVDBlock,
     """
     D, H, dh = svd_block.D, svd_block.H, svd_block.dh
 
-    # Dense attn in linear form [D,3D]
-    Wc_lin = as_linear_weight(dense_block.attn.c_attn.weight.data, in_dim=D, out_dim=3 * D)
+    # Normalize dense attn weight to linear form [D,3D]
+    Wc_raw = dense_block.attn.c_attn.weight.data
     bc = dense_block.attn.c_attn.bias.data.to(device=x.device, dtype=x.dtype)
+    W_lin = as_linear_weight(Wc_raw, in_dim=D, out_dim=3 * D)  # [D,3D]
 
-    qkv = x @ Wc_lin + bc  # [B,S,3D]
+    qkv = x @ W_lin + bc  # [B,S,3D]
     q, k, v = qkv.split(D, dim=-1)
     q = q.view(x.shape[0], x.shape[1], H, dh).permute(0, 2, 1, 3).contiguous()
     k = k.view(x.shape[0], x.shape[1], H, dh).permute(0, 2, 1, 3).contiguous()
@@ -440,12 +387,12 @@ def compare_qkv_intermediate(dense_block: nn.Module, svd_block: LowRankSVDBlock,
 
 
 @torch.no_grad()
-def end_to_end_validation(dense: GPT2LMHeadModel, svd: GPT2LMHeadModel, device: str, use_cache: bool = False):
+def end_to_end_validation(dense: GPT2LMHeadModel, svd: GPT2LMHeadModel, device: str):
     test_input_ids = torch.randint(0, 1000, (2, 16), device=device)
     attn = torch.ones_like(test_input_ids, device=device)
 
-    o1 = dense(input_ids=test_input_ids, attention_mask=attn, use_cache=use_cache).logits
-    o2 = svd(input_ids=test_input_ids, attention_mask=attn, use_cache=use_cache).logits
+    o1 = dense(input_ids=test_input_ids, attention_mask=attn, use_cache=False).logits
+    o2 = svd(input_ids=test_input_ids, attention_mask=attn, use_cache=False).logits
 
     max_diff = (o1 - o2).abs().max().item()
     rel_diff = (o1 - o2).norm() / (o1.norm() + 1e-12)
@@ -530,7 +477,6 @@ def main():
     parser.add_argument("--max-length", type=int, default=256)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--debug-attn", action="store_true")
-    parser.add_argument("--validate-cache", action="store_true", help="Also validate with use_cache=True")
 
     args = parser.parse_args()
 
@@ -539,6 +485,7 @@ def main():
 
     # ===== Dense model (reference) =====
     dense = GPT2LMHeadModel.from_pretrained("gpt2")
+    dense.config.use_cache = False
     dense = dense.to(device).eval()
     for p in dense.parameters():
         p.requires_grad = False
@@ -576,15 +523,7 @@ def main():
     # ===== Optional validation =====
     if args.validate:
         print("\n=== SVD Validation ===")
-        # End-to-end logits diff (no cache)
-        maxd, reld = end_to_end_validation(dense, svd_model, device=device, use_cache=False)
-
-        # Optional: validate with cache (same batch, full pass)
-        if args.validate_cache:
-            print("\n--- With KV Cache ---")
-            _maxd2, _reld2 = end_to_end_validation(dense, svd_model, device=device, use_cache=True)
-
-        # Localize Q/K/V on block 0 with post-LN input
+        maxd, reld = end_to_end_validation(dense, svd_model, device=device)
         print("\n--- Block-0 Q/K/V check ---")
         with torch.no_grad():
             test_ids = torch.randint(0, 1000, (2, 16), device=device)

@@ -1,9 +1,7 @@
 # gpt2.py should load the pre-computed low-rank factors for computation
 #         it should not redo the SVD, but load it directly
 
-# Update 6.26.2025: We have added the FWSVD along with vanilla SVD here for computation
-# Issue: we should expect the activation memory of the dense be smaller than the memory of the flashsvd
-#        but in here we see the activation of flashsvd be slightly larger --> 311 v.s. 274
+# NOTE: this code do inference with built-in GPT2
 import os
 import sys
 import torch
