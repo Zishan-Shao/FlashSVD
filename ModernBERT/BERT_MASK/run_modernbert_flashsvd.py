@@ -603,15 +603,15 @@ def main():
     print("Device:", device)
 
     # Ranks for compression testing (now using correct head-wise approach)
-    RANK_ATTN = 64   # Full rank per head
-    RANK_FFN  = 768  # Keep full rank for FFN for now
+    RANK_ATTN = 64 // 4   # Full rank per head
+    RANK_FFN  = 768 // 4  # Keep full rank for FFN for now
 
     cfg = AutoConfig.from_pretrained(MODEL_DIR, trust_remote_code=True)
     cfg._attn_implementation = "sdpa"
 
     dense = AutoModelForSequenceClassification.from_pretrained(MODEL_DIR, config=cfg, trust_remote_code=True).to(device).eval()
     tok = AutoTokenizer.from_pretrained(MODEL_DIR, trust_remote_code=True)
-    loader = _build_loader(tok, seq_len=128*4, batch_size=64)
+    loader = _build_loader(tok, seq_len=2048, batch_size=16)
 
     # Clean memory and measure baseline (original dense model)
     torch.cuda.empty_cache()
@@ -655,6 +655,10 @@ def main():
     # Measure the clean SVD model storage (persistent baseline for inference)
     persistent_baseline = torch.cuda.max_memory_allocated() / 1024**2
     print(f"Persistent low-rank model storage (SVD): {persistent_baseline:.1f} MiB")
+    
+    # Store the original baseline for correct transient calculation
+    original_baseline = CACHED_ORIG_MEM
+    # Update CACHED_ORIG_MEM to use the clean SVD baseline for inference
     CACHED_ORIG_MEM = persistent_baseline
 
     acc = quick_check(svd, loader, device)
@@ -663,9 +667,10 @@ def main():
     # Comprehensive memory and latency measurement (entire validation split)
     full_acc, peak_lr, latency_ms = acc_peak_time(svd, loader, device, use_mask=True)
 
-    # Calculate real peak memory using the same formula as BERT profile
-    real_peak_mib = peak_lr - with_act + CACHED_ORIG_MEM
-    transient_mib = peak_lr - CACHED_ORIG_MEM
+    # Calculate real peak memory: remove construction overhead, add back original baseline
+    real_peak_mib = peak_lr - with_act + original_baseline
+    # Calculate transient memory: peak during inference minus persistent baseline
+    transient_mib = peak_lr - persistent_baseline
 
     print(f"FlashSVD     | acc={full_acc:.4f} | peak ={peak_lr:6.1f} MiB | real peak ={real_peak_mib:6.1f} MiB | Transient={transient_mib:6.1f} MiB | {latency_ms:6.1f} ms/b")
 

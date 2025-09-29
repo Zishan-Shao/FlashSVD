@@ -787,15 +787,15 @@ def main():
     print("Device:", device)
 
     # Ranks for compression testing (now using correct head-wise approach)
-    RANK_ATTN = 64   # Full rank per head
-    RANK_FFN  = 512  # Keep full rank for FFN for now
+    RANK_ATTN = 48#64   # Full rank per head
+    RANK_FFN  = 400#512  # Keep full rank for FFN for now
 
     cfg = AutoConfig.from_pretrained(MODEL_DIR, trust_remote_code=True)
     cfg._attn_implementation = "sdpa"
 
     dense = AutoModelForSequenceClassification.from_pretrained(MODEL_DIR, config=cfg, trust_remote_code=True).to(device).eval()
     tok = AutoTokenizer.from_pretrained(MODEL_DIR, trust_remote_code=True)
-    loader = _build_loader(tok, seq_len=128*4, batch_size=64)
+    loader = _build_loader(tok, seq_len=2048, batch_size=8)
 
     # Build Fisher from the dense model
     loader_fisher = _build_loader(tok, seq_len=512, batch_size=16)
