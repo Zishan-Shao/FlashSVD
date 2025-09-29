@@ -1255,6 +1255,7 @@ if __name__ == "__main__":
     main()
 
 
-# python profile_svd_kv_infer_w_whiten.py --user-prompt --generate-tokens 100 --overwrite-whiten --compare-dense --rank-ratio-attn 0.9 --rank-ratio-mlp 1.0
+# python profile_svd_kv_infer_w_whiten.py --user-prompt --generate-tokens 100 --overwrite-whiten --compare-dense --rank-ratio-attn 0.9 --rank-ratio-mlp 0.9
 
+# python profile_svd_kv_infer_w_whiten.py --validate --whiten --overwrite-whiten --compare-dense --rank-ratio-attn 0.9 --rank-ratio-mlp 0.9
 

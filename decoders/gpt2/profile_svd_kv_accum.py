@@ -783,4 +783,4 @@ if __name__ == "__main__":
     main()
 
 # Example:
-# CUDA_LAUNCH_BLOCKING=1 TORCH_USE_CUDA_DSA=1 python3 profile_svd_kv_accum.py --decode-mem --compare-dense --decode-batch 2 --prompt-len 64 --decode-curve 128,256
+# CUDA_LAUNCH_BLOCKING=1 TORCH_USE_CUDA_DSA=1 python3 profile_svd_kv_accum.py --decode-mem --compare-dense --decode-batch 2 --prompt-len 64 --decode-curve 128,256 --rank-ratio-attn 0.5 --rank-ratio-mlp 0.5
