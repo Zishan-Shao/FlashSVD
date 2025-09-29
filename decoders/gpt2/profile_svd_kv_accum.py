@@ -26,6 +26,8 @@ from datasets import load_dataset
 from transformers import GPT2LMHeadModel, AutoTokenizer
 
 
+from kernels.flash_attn_causal import flash_attn_triton_kvcache
+
 # =========================
 # Utils
 # =========================
@@ -236,10 +238,10 @@ class LowRankSVDBlock(nn.Module):
 
         total_len = past_len + S
 
-        attn_scores = torch.matmul(Q, K_cat.transpose(-2, -1)) * self.scale  # [B,H,S,total_len]
+        #attn_scores = torch.matmul(Q, K_cat.transpose(-2, -1)) * self.scale  # [B,H,S,total_len]
 
         causal = make_causal_slice_mask(S, total_len, device=dev, dtype=torch.bool)
-        attn_scores = attn_scores.masked_fill(~causal[None, None, :, :], neg_inf)
+        attn_scores = flash_attn_triton_kvcache(Q, K_cat, V_cat, causal) #attn_scores.masked_fill(~causal[None, None, :, :], neg_inf)
 
         if attention_mask is not None:
             if attention_mask.dim() == 4:

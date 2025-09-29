@@ -42,6 +42,12 @@ def compute_persistent_memory(m: nn.Module) -> float:
         total += p.numel() * p.element_size()
     return total / (1024**2)
 
+def compute_module_param_bytes(m: nn.Module) -> int:
+    total = 0
+    for p in itertools.chain(m.parameters(), m.buffers()):
+        total += p.numel() * p.element_size()
+    return total
+
 def svd_factor(W: torch.Tensor, rank: int) -> Tuple[torch.Tensor, torch.Tensor]:
     if W.dtype not in (torch.float32, torch.float64):
         W = W.float()
@@ -420,6 +426,97 @@ class LayerShim(nn.Module):
         return result
 
 
+# =========================
+# Dense GPT-2 Block with FlashAttention kernel
+# =========================
+class DenseFlashBlock(nn.Module):
+    def __init__(self, hf_layer: nn.Module):
+        super().__init__()
+        attn = hf_layer.attn
+        self.hf_attn = attn
+        self.ln1 = hf_layer.ln_1
+        self.ln2 = hf_layer.ln_2
+        self.mlp = hf_layer.mlp
+
+        D = attn.embed_dim
+        H = attn.num_heads
+        if D % H != 0:
+            raise ValueError(f"[DenseFlashBlock] embed_dim={D} not divisible by heads={H}")
+        dh = D // H
+
+        self.D, self.H, self.dh = D, H, dh
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        layer_past: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # [B,H,T_past,dh]
+        attention_mask: Optional[torch.Tensor] = None,
+        use_cache: bool = False,
+        output_attentions: bool = False,
+        **kwargs,
+    ):
+        B, S, D = hidden_states.shape
+        dev = hidden_states.device
+
+        x = self.ln1(hidden_states)
+        qkv = self.hf_attn.c_attn(x)  # [B,S,3D]
+        q, k, v = qkv.split(self.D, dim=-1)
+        # to [B,H,S,dh]
+        Q = q.view(B, S, self.H, self.dh).permute(0, 2, 1, 3).contiguous()
+        K = k.view(B, S, self.H, self.dh).permute(0, 2, 1, 3).contiguous()
+        V = v.view(B, S, self.H, self.dh).permute(0, 2, 1, 3).contiguous()
+
+        past_len = 0
+        if isinstance(layer_past, (tuple, list)) and len(layer_past) == 2 and layer_past[0] is not None:
+            past_k, past_v = layer_past
+            if past_k.dtype != K.dtype: past_k = past_k.to(dtype=K.dtype)
+            if past_v.dtype != V.dtype: past_v = past_v.to(dtype=V.dtype)
+            if past_k.device != K.device: past_k = past_k.to(K.device)
+            if past_v.device != V.device: past_v = past_v.to(V.device)
+            K_cat = torch.cat([past_k, K], dim=2)
+            V_cat = torch.cat([past_v, V], dim=2)
+            past_len = past_k.size(2)
+        else:
+            K_cat, V_cat = K, V
+
+        # Build [B,H,1,S] query mask
+        if attention_mask is not None:
+            if attention_mask.dim() == 4:
+                q_mask = attention_mask[..., -S:].to(dtype=torch.bool)
+                if q_mask.size(2) != 1:
+                    q_mask = q_mask[..., :1, :]
+            elif attention_mask.dim() == 2:
+                q_mask = attention_mask[:, -S:].bool()[:, None, None, :]
+            else:
+                q_mask = torch.ones(B, 1, 1, S, dtype=torch.bool, device=dev)
+        else:
+            q_mask = torch.ones(B, 1, 1, S, dtype=torch.bool, device=dev)
+        attn_mask_bh1s = q_mask.expand(B, self.H, 1, S).contiguous()
+
+        # FlashAttention kernel
+        Y_heads = flash_attn_triton_kvcache(Q, K_cat, V_cat, attn_mask_bh1s)  # [B,H,S,dh]
+        Y = Y_heads.transpose(1, 2).contiguous().view(B, S, D)
+
+        # Output proj + residual
+        Y = self.hf_attn.c_proj(Y)
+        hidden_states = hidden_states + Y
+
+        # FFN + residual
+        z = self.ln2(hidden_states)
+        h2 = self.mlp(z)
+        hidden_states = hidden_states + h2
+
+        outputs = (hidden_states,)
+        if use_cache:
+            outputs = outputs + ((K, V),)
+        if output_attentions:
+            outputs = outputs + (None,)
+        return outputs
+
+def enable_flashattention_for_dense(model: GPT2LMHeadModel) -> None:
+    for i, layer in enumerate(model.transformer.h):
+        model.transformer.h[i] = LayerShim(DenseFlashBlock(layer), layer_idx=i, asvd=False)
+
 
 # =========================
 # Builders & Validators
@@ -699,7 +796,7 @@ def decode_growth_curve(
     safe_hi = min(1000, vocab)
     prompt = torch.randint(0, safe_hi, (batch_size, prompt_len), device=device)
 
-    header = f"{'new_T':>8} | {'peak_alloc(MiB)':>16} | {'est_KV(MiB)':>12} | {'toks/s':>10} | {'total_T':>8}"
+    header = f"{'new_T':>8} | {'peak_alloc(MiB)':>16} | {'est_KV(MiB)':>12} | {'toks/s':>10} | {'total_T':>8} | {'param(MiB)':>11} | {'act_est(MiB)':>13} | {'act_wo_kv(MiB)':>16}"
     print(header)
     print("-" * len(header))
     for new_T in curve_lens:
@@ -707,7 +804,10 @@ def decode_growth_curve(
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
         metrics = decode_once_with_cache(model, prompt, new_T, device)
-        print(f"{new_T:8d} | {metrics['peak_alloc_MiB']:16.1f} | {metrics['est_KV_MiB']:12.1f} | {metrics['toks_per_s']:10.2f} | {metrics['total_tokens']:8d}")
+        param_mib = compute_module_param_bytes(model)/(1024**2)
+        act_est_mib = max(0.0, metrics['peak_alloc_MiB'] - param_mib)
+        act_wo_kv_mib = max(0.0, metrics['peak_alloc_MiB'] - param_mib - metrics['est_KV_MiB'])
+        print(f"{new_T:8d} | {metrics['peak_alloc_MiB']:16.1f} | {metrics['est_KV_MiB']:12.1f} | {metrics['toks_per_s']:10.2f} | {metrics['total_tokens']:8d} | {param_mib:11.1f} | {act_est_mib:13.1f} | {act_wo_kv_mib:16.1f}")
 
 
 # =========================
@@ -818,10 +918,11 @@ def main():
             },
         )
 
-        print("\n=== Dense baseline ===")
+        print("\n=== Dense baseline (FlashAttention) ===")
         # Offload SVD while profiling Dense
         svd_model = svd_model.to("cpu")
         dense = dense.to(device)
+        enable_flashattention_for_dense(dense)
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
@@ -892,6 +993,7 @@ def main():
             # Offload SVD; run Dense curve
             svd_model = svd_model.to("cpu")
             dense = dense.to(device)
+            enable_flashattention_for_dense(dense)
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
                 torch.cuda.reset_peak_memory_stats()
