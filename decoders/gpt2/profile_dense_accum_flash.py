@@ -1,28 +1,29 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-profile_asvd_accum_flash.py  —  Minimal ASVD decode memory profiler (no big logits)
+profile_dense_flash_kv.py — Dense (full) KV-cache decode memory profiler with FlashAttention (no big logits)
 
 What this version does:
-- ASVD-only (no dense baseline anywhere).
-- **Avoids full [B,S,V] logits**: we call model.transformer() and apply lm_head
-  only on the last position to choose the next token.
-- Measures KV size using allocator-accurate storage bytes (includes padding).
-- Reports prefill vs decode:
-    * time (ms)
-    * peak allocated (MiB) per phase (max_memory_allocated)
-    * post-step allocated peak (MiB) — measured right after each token step
-    * end-of-phase allocated (MiB) — steady memory at phase end
-    * KV_end (MiB) — actual bytes occupied by KV storages
-- Aggressive freeing in forward() to minimize transient pressure.
+- Dense baseline ONLY (no ASVD anywhere).
+- Uses a custom DenseKVCache we control (per-layer dense K,V).
+- Dense forward uses our FlashAttention kernel (flash_attn_triton_kvcache).
+- **Avoids full [B,S,V] logits**: we call model.transformer() and apply lm_head only on the last position.
+- Memory accounting:
+    * Prefill vs Decode times (ms)
+    * Prefill/Decode peaks (MiB) via torch.cuda.max_memory_allocated()
+    * Decode post-step allocated peak (MiB) — grows with sequence length
+    * Decode end-of-phase allocated (MiB) — grows with sequence length
+    * KV_end (MiB): allocator-accurate storage bytes for KV (deduped storages)
+- Aggressive freeing between phases to reduce transient pressure.
 
-
-CUDA_VISIBLE_DEVICES=0 python3 profile_asvd_accum_flash.py   --decode-batch 16   --prompt-len 256   --decode-curve 128,256   --rounds 3   --rank-ratio-attn 1   --rank-ratio-mlp 1   --kv-profile
-
+Usage:
+CUDA_VISIBLE_DEVICES=0 \
+python3 profile_dense_accum_flash.py --decode-batch 16 --prompt-len 256 \
+  --decode-curve 128,256 --rounds 1 --kv-profile
 """
 
-import os, math, time, argparse, statistics, itertools, gc
-from typing import Optional, Dict, Tuple, List, Union
+import time, argparse, statistics, gc
+from typing import Optional, Dict, Tuple, List
 
 import torch
 import torch.nn as nn
@@ -41,20 +42,6 @@ def set_seed(seed: int = 0):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
-def svd_factor(W: torch.Tensor, rank: int) -> Tuple[torch.Tensor, torch.Tensor]:
-    if W.dtype not in (torch.float32, torch.float64):
-        W = W.float()
-    W = W.contiguous()
-    try:
-        U, S, Vh = torch.linalg.svd(W, full_matrices=False)
-    except TypeError:
-        U_, S_, V_ = torch.svd(W)
-        U, S, Vh = U_, S_, V_.t()
-    r = min(rank, S.numel())
-    U_r = U[:, :r].contiguous()
-    V_r = (S[:r, None] * Vh[:r, :]).contiguous()
-    return U_r, V_r
-
 def as_linear_weight(W_raw: torch.Tensor, in_dim: int, out_dim: int) -> torch.Tensor:
     if W_raw.shape == (in_dim, out_dim):
         return W_raw.contiguous()
@@ -70,7 +57,7 @@ class KVProfiler:
     Per-phase profiler: 'prefill' and 'decode'.
     Tracks wall times, KV bytes, and memory checkpoints:
       - qkv_s, attn_s, update_s, kv_new_bytes, kv_read_bytes, calls
-      - poststep_peak_bytes: max(memory_allocated) right after a step
+      - poststep_peak_bytes: max(memory_allocated) right after each token integration
       - end_alloc_bytes: memory_allocated at end of phase
     """
     def __init__(self):
@@ -141,10 +128,10 @@ def attach_profiler(model: GPT2LMHeadModel, prof: Optional[KVProfiler]):
             blk.profiler = prof
 
 # -------------------------
-# ASVD cache
+# Dense KV cache
 # -------------------------
-class ASVDCache:
-    """ Holds per-layer low-rank factors (Pk, Pv) with shape [B,H,T,r]. """
+class DenseKVCache:
+    """Per-layer dense K,V with shape [B,H,T,dh]."""
     def __init__(self, n_layers: int):
         self.layers: List[Optional[Tuple[torch.Tensor, torch.Tensor]]] = [None] * n_layers
     def get_seq_length(self, layer_idx: int) -> int:
@@ -153,146 +140,43 @@ class ASVDCache:
     def get(self, layer_idx: int) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
         return self.layers[layer_idx]
     @torch.no_grad()
-    def update(self, Pk_new: torch.Tensor, Pv_new: torch.Tensor, layer_idx: int):
-        assert Pk_new.dim() == 4 and Pv_new.dim() == 4, "Pk/Pv must be [B,H,S_new,r]"
+    def update(self, K_new: torch.Tensor, V_new: torch.Tensor, layer_idx: int):
+        assert K_new.dim() == 4 and V_new.dim() == 4, "K/V must be [B,H,S_new,dh]"
         entry = self.layers[layer_idx]
         if entry is None:
-            self.layers[layer_idx] = (Pk_new, Pv_new)
+            self.layers[layer_idx] = (K_new, V_new)
         else:
-            Pk, Pv = entry
+            K, V = entry
             self.layers[layer_idx] = (
-                torch.cat([Pk, Pk_new], dim=2),
-                torch.cat([Pv, Pv_new], dim=2),
+                torch.cat([K, K_new], dim=2),
+                torch.cat([V, V_new], dim=2),
             )
 
 # -------------------------
-# Low-rank GPT-2 Block (ASVD)
+# Dense GPT-2 Block with FlashAttention kernel
 # -------------------------
-class LowRankSVDBlock(nn.Module):
-    """
-    GPT-2 block with per-head low-rank factors U,V for Q/K/V and MLP.
-    If asvd=True, the cache stores Pk = X @ Uk and Pv = X @ Uv, then we
-    reconstruct dense K,V on the fly for attention.
-    """
-    def __init__(
-        self,
-        hf_layer: nn.Module,
-        rank_ratio_attn: float = 1.0,
-        rank_ratio_mlp: float = 1.0,
-        preload_factors: Optional[Dict[str, torch.Tensor]] = None,
-        asvd: bool = True,
-    ):
+class DenseFlashBlock(nn.Module):
+    def __init__(self, hf_layer: nn.Module):
         super().__init__()
         attn = hf_layer.attn
+        self.hf_attn = attn
         self.ln1 = hf_layer.ln_1
         self.ln2 = hf_layer.ln_2
+        self.mlp = hf_layer.mlp
 
         D = attn.embed_dim
         H = attn.num_heads
         if D % H != 0:
-            raise ValueError(f"[LowRankSVDBlock] embed_dim={D} not divisible by heads={H}")
+            raise ValueError(f"[DenseFlashBlock] embed_dim={D} not divisible by heads={H}")
         dh = D // H
 
         self.D, self.H, self.dh = D, H, dh
-        self.asvd = asvd
-
-        dev = next(hf_layer.parameters()).device
-        ptdtype = next(hf_layer.parameters()).dtype
-
-        # ---- ATTENTION (Q,K,V) ----
-        Wc_lin = as_linear_weight(hf_layer.attn.c_attn.weight.data, in_dim=D, out_dim=3 * D)
-        bc = hf_layer.attn.c_attn.bias.data.clone().to(device=dev, dtype=ptdtype)
-        q_w = Wc_lin[:, :D].contiguous().view(D, H, dh)
-        k_w = Wc_lin[:, D:2*D].contiguous().view(D, H, dh)
-        v_w = Wc_lin[:, 2*D:3*D].contiguous().view(D, H, dh)
-        q_b = bc[:D].view(H, dh).contiguous()
-        k_b = bc[D:2*D].view(H, dh).contiguous()
-        v_b = bc[2*D:3*D].view(H, dh).contiguous()
-
-        r_attn = max(1, int(rank_ratio_attn * min(D, dh)))
-        def alloc_uv(name: str):
-            U = nn.Parameter(torch.empty(D, H, r_attn, device=dev, dtype=ptdtype))
-            V = nn.Parameter(torch.empty(H, r_attn, dh, device=dev, dtype=ptdtype))
-            self.register_parameter(f"{name}_U", U)
-            self.register_parameter(f"{name}_V", V)
-            return U, V
-        self.q_U, self.q_V = alloc_uv("q")
-        self.k_U, self.k_V = alloc_uv("k")
-        self.v_U, self.v_V = alloc_uv("v")
-        self.q_b = nn.Parameter(q_b.to(device=dev, dtype=ptdtype))
-        self.k_b = nn.Parameter(k_b.to(device=dev, dtype=ptdtype))
-        self.v_b = nn.Parameter(v_b.to(device=dev, dtype=ptdtype))
-
-        if preload_factors is None:
-            with torch.no_grad():
-                for name, W_h in (("q", q_w), ("k", k_w), ("v", v_w)):
-                    U_param = getattr(self, f"{name}_U")
-                    V_param = getattr(self, f"{name}_V")
-                    Us, Vs = [], []
-                    for h in range(H):
-                        Wh = W_h[:, h, :]
-                        Uh, Vh = svd_factor(Wh, r_attn)
-                        Us.append(Uh.to(device=dev, dtype=ptdtype))
-                        Vs.append(Vh.to(device=dev, dtype=ptdtype))
-                    U = torch.stack(Us, dim=1)
-                    V = torch.stack(Vs, dim=0)
-                    U_param.copy_(U)
-                    V_param.copy_(V)
-        else:
-            self.load_factors_(preload_factors)
-
-        # ---- OUT PROJ ----
-        W_out_lin = as_linear_weight(hf_layer.attn.c_proj.weight.data, in_dim=D, out_dim=D)
-        b_out = hf_layer.attn.c_proj.bias.data.clone().to(device=dev, dtype=ptdtype)
-        r_out = max(1, int(rank_ratio_attn * min(W_out_lin.shape)))
-        Uo, Vo = svd_factor(W_out_lin, r_out)
-        self.out_U = nn.Parameter(Uo.to(device=dev, dtype=ptdtype))
-        self.out_V = nn.Parameter(Vo.to(device=dev, dtype=ptdtype))
-        self.out_b = nn.Parameter(b_out)
-
-        # ---- MLP ----
-        I = hf_layer.mlp.c_fc.bias.data.numel()
-        W1_lin = as_linear_weight(hf_layer.mlp.c_fc.weight.data, in_dim=D, out_dim=I)
-        b_fc1 = hf_layer.mlp.c_fc.bias.data.clone().to(device=dev, dtype=ptdtype)
-        r_fc1 = max(1, int(rank_ratio_mlp * min(W1_lin.shape)))
-        U1, V1 = svd_factor(W1_lin, r_fc1)
-        self.fc1_U = nn.Parameter(U1.to(device=dev, dtype=ptdtype))
-        self.fc1_V = nn.Parameter(V1.to(device=dev, dtype=ptdtype))
-        self.fc1_b = nn.Parameter(b_fc1)
-
-        W2_lin = as_linear_weight(hf_layer.mlp.c_proj.weight.data, in_dim=I, out_dim=D)
-        b_fc2 = hf_layer.mlp.c_proj.bias.data.clone().to(device=dev, dtype=ptdtype)
-        r_fc2 = max(1, int(rank_ratio_mlp * min(W2_lin.shape)))
-        U2, V2 = svd_factor(W2_lin, r_fc2)
-        self.fc2_U = nn.Parameter(U2.to(device=dev, dtype=ptdtype))
-        self.fc2_V = nn.Parameter(V2.to(device=dev, dtype=ptdtype))
-        self.fc2_b = nn.Parameter(b_fc2)
-
-        self.r_attn = r_attn
         self.profiler: Optional[KVProfiler] = None
-
-    def factors_state_dict(self) -> Dict[str, torch.Tensor]:
-        return {
-            "q_U": self.q_U, "q_V": self.q_V, "q_b": self.q_b,
-            "k_U": self.k_U, "k_V": self.k_V, "k_b": self.k_b,
-            "v_U": self.v_U, "v_V": self.v_V, "v_b": self.v_b,
-            "out_U": self.out_U, "out_V": self.out_V, "out_b": self.out_b,
-            "fc1_U": self.fc1_U, "fc1_V": self.fc1_V, "fc1_b": self.fc1_b,
-            "fc2_U": self.fc2_U, "fc2_V": self.fc2_V, "fc2_b": self.fc2_b,
-        }
-
-    def load_factors_(self, tensors: Dict[str, torch.Tensor]):
-        mine = self.factors_state_dict()
-        for k, p in mine.items():
-            if k not in tensors:
-                raise KeyError(f"Missing factor '{k}' in preload_factors")
-            with torch.no_grad():
-                p.copy_(tensors[k].to(dtype=p.dtype, device=p.device))
 
     def forward(
         self,
-        hidden_states: torch.Tensor,                           # [B,S,D]
-        layer_past: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # (Pk,Pv) [B,H,T_past,r]
+        hidden_states: torch.Tensor,
+        layer_past: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # [B,H,T_past,dh]
         attention_mask: Optional[torch.Tensor] = None,
         use_cache: bool = False,
         output_attentions: bool = False,
@@ -300,43 +184,37 @@ class LowRankSVDBlock(nn.Module):
     ):
         B, S, D = hidden_states.shape
         dev = hidden_states.device
-        H, dh, r = self.H, self.dh, self.r_attn
         prof: Optional[KVProfiler] = self.profiler
 
-        # LN1
         x = self.ln1(hidden_states)
 
-        # ---- Build Q, factors, and reconstruct dense new-step K,V
         t0 = time.perf_counter()
-        Q = torch.einsum('bsd,dhr,hre->bhse', x, self.q_U, self.q_V) + self.q_b[None, :, None, :]
-        Pk_new = torch.einsum('bsd,dhr->bhsr', x, self.k_U)
-        Pv_new = torch.einsum('bsd,dhr->bhsr', x, self.v_U)
-        del x
-        K_new  = torch.einsum('bhsr,hrd->bhsd', Pk_new, self.k_V) + self.k_b[None, :, None, :]
-        V_new  = torch.einsum('bhsr,hrd->bhsd', Pv_new, self.v_V) + self.v_b[None, :, None, :]
+        qkv = self.hf_attn.c_attn(x)  # [B,S,3D]
+        q, k, v = qkv.split(self.D, dim=-1)
+        del qkv
 
-        # Concat past factors (reconstruct dense K_cat/V_cat)
-        if layer_past is not None and isinstance(layer_past, (tuple, list)) and len(layer_past) == 2:
-            past0, past1 = layer_past
-            if past0 is not None and past0.dim() == 4 and past0.size(-1) == r:
-                Pk_cat = torch.cat([past0.to(Pk_new.dtype), Pk_new], dim=2)
-                Pv_cat = torch.cat([past1.to(Pv_new.dtype), Pv_new], dim=2)
-                K_cat = torch.einsum('bhtR,hRd->bhtd', Pk_cat, self.k_V) + self.k_b[None, :, None, :]
-                V_cat = torch.einsum('bhtR,hRd->bhtd', Pv_cat, self.v_V) + self.v_b[None, :, None, :]
-                del Pk_cat, Pv_cat
-            else:
-                K_cat = torch.cat([past0.to(K_new.dtype), K_new], dim=2)
-                V_cat = torch.cat([past1.to(V_new.dtype), V_new], dim=2)
+        Q = q.view(B, S, self.H, self.dh).permute(0, 2, 1, 3).contiguous(); del q
+        K = k.view(B, S, self.H, self.dh).permute(0, 2, 1, 3).contiguous(); del k
+        V = v.view(B, S, self.H, self.dh).permute(0, 2, 1, 3).contiguous(); del v
+
+        if isinstance(layer_past, (tuple, list)) and len(layer_past) == 2 and layer_past[0] is not None:
+            past_k, past_v = layer_past
+            if past_k.dtype != K.dtype: past_k = past_k.to(dtype=K.dtype)
+            if past_v.dtype != V.dtype: past_v = past_v.to(dtype=V.dtype)
+            if past_k.device != K.device: past_k = past_k.to(K.device)
+            if past_v.device != V.device: past_v = past_v.to(V.device)
+            K_cat = torch.cat([past_k, K], dim=2)
+            V_cat = torch.cat([past_v, V], dim=2)
         else:
-            K_cat, V_cat = K_new, V_new
+            K_cat, V_cat = K, V
 
         if prof:
             prof.add_time("qkv_s", time.perf_counter() - t0)
             prof.add_bytes("kv_read_bytes", (K_cat.numel() + V_cat.numel()) * K_cat.element_size())
-            prof.add_bytes("kv_new_bytes", (Pk_new.numel() + Pv_new.numel()) * Pk_new.element_size())
+            prof.add_bytes("kv_new_bytes", (K.numel() + V.numel()) * K.element_size())
             prof.inc_calls()
 
-        # ---- Attention (build compact mask)
+        # Mask (build compact BH1S; free asap)
         if attention_mask is not None:
             if attention_mask.dim() == 4:
                 q_mask = attention_mask[..., -S:].to(dtype=torch.bool)
@@ -348,7 +226,7 @@ class LowRankSVDBlock(nn.Module):
                 q_mask = torch.ones(B, 1, 1, S, dtype=torch.bool, device=dev)
         else:
             q_mask = torch.ones(B, 1, 1, S, dtype=torch.bool, device=dev)
-        attn_mask_bh1s = q_mask.expand(B, H, 1, S).contiguous()
+        attn_mask_bh1s = q_mask.expand(B, self.H, 1, S).contiguous()
         del q_mask
 
         tA0 = time.perf_counter()
@@ -358,49 +236,34 @@ class LowRankSVDBlock(nn.Module):
         # Free big attention inputs
         del Q, K_cat, V_cat, attn_mask_bh1s
 
-        # Merge heads
-        Y = Y_heads.transpose(1, 2).contiguous().view(B, S, self.D)
-        del Y_heads
+        Y = Y_heads.transpose(1, 2).contiguous().view(B, S, D); del Y_heads
 
-        # Out proj + residual
-        Y = torch.matmul(torch.matmul(Y, self.out_U), self.out_V)
-        Y.add_(self.out_b)
-        hidden_states = hidden_states.add(Y)
-        del Y
+        # Output proj + residual
+        Y = self.hf_attn.c_proj(Y)
+        hidden_states = hidden_states.add(Y); del Y
 
-        # MLP (+ residual) with aggressive frees
+        # FFN + residual
         z = self.ln2(hidden_states)
-        t1 = torch.matmul(z, self.fc1_U); del z
-        h1 = torch.matmul(t1, self.fc1_V); del t1
-        h1.add_(self.fc1_b)
-        h1 = F.gelu(h1)
-        t2 = torch.matmul(h1, self.fc2_U); del h1
-        h2 = torch.matmul(t2, self.fc2_V); del t2
-        h2.add_(self.fc2_b)
-        hidden_states.add_(h2); del h2
+        h2 = self.mlp(z); del z
+        hidden_states = hidden_states.add(h2); del h2
 
         outputs = (hidden_states,)
         if use_cache:
-            outputs = outputs + ((Pk_new, Pv_new),)
+            # return ONLY the new-step K,V for cache
+            outputs = outputs + ((K, V),)
         else:
-            del Pk_new, Pv_new
+            del K, V
 
         if output_attentions:
             outputs = outputs + (None,)
         return outputs
 
-def _attach_asvd_cache_to_shims(model, asvd_cache):
-    for i, layer in enumerate(model.transformer.h):
-        if isinstance(layer, LayerShim) and layer.asvd:
-            setattr(layer, "_asvd_cache", asvd_cache)
-
 class LayerShim(nn.Module):
-    def __init__(self, block: LowRankSVDBlock, layer_idx: int, asvd: bool = True):
+    def __init__(self, block: DenseFlashBlock, layer_idx: int):
         super().__init__()
         self.block = block
         self.layer_idx = layer_idx
-        self.asvd = asvd
-        self._asvd_cache = None
+        self._dense_cache: Optional[DenseKVCache] = None
         self.profiler: Optional[KVProfiler] = None
 
     def forward(self, hidden_states, past_key_value=None, cache_position=None, attention_mask=None, *args, **kwargs):
@@ -408,11 +271,12 @@ class LayerShim(nn.Module):
         prof: Optional[KVProfiler] = self.profiler
         layer_past = None
 
-        if self.asvd and use_cache_flag:
-            asvd_cache = getattr(self, "_asvd_cache", None)
-            if isinstance(asvd_cache, ASVDCache):
-                entry = asvd_cache.get(self.layer_idx)
-                if entry is not None and asvd_cache.get_seq_length(self.layer_idx) > 0:
+        # use our DenseKVCache when enabled
+        if use_cache_flag:
+            dense_cache = getattr(self, "_dense_cache", None)
+            if isinstance(dense_cache, DenseKVCache):
+                entry = dense_cache.get(self.layer_idx)
+                if entry is not None and dense_cache.get_seq_length(self.layer_idx) > 0:
                     layer_past = entry
 
         result = self.block(
@@ -423,21 +287,26 @@ class LayerShim(nn.Module):
             output_attentions=kwargs.get("output_attentions", False),
         )
 
-        if self.asvd and use_cache_flag:
-            asvd_cache = getattr(self, "_asvd_cache", None)
-            if (isinstance(asvd_cache, ASVDCache) and
+        if use_cache_flag:
+            dense_cache = getattr(self, "_dense_cache", None)
+            if (isinstance(dense_cache, DenseKVCache) and
                 isinstance(result, tuple) and len(result) >= 2 and
                 isinstance(result[1], (tuple, list)) and len(result[1]) == 2):
-                Pk_new, Pv_new = result[1]
+                K_new, V_new = result[1]
                 t0 = time.perf_counter()
-                asvd_cache.update(Pk_new, Pv_new, self.layer_idx)
+                dense_cache.update(K_new, V_new, self.layer_idx)
                 if prof: prof.add_time("update_s", time.perf_counter() - t0)
         return result
 
+def _attach_dense_cache_to_shims(model, dense_cache: DenseKVCache):
+    for layer in model.transformer.h:
+        if isinstance(layer, LayerShim):
+            setattr(layer, "_dense_cache", dense_cache)
+
 # -------------------------
-# Build ASVD model
+# Build Dense+FA model
 # -------------------------
-def build_asvd_model(rank_ratio_attn: float, rank_ratio_mlp: float, device: Optional[str] = None) -> GPT2LMHeadModel:
+def build_dense_fa_model(device: Optional[str] = None) -> GPT2LMHeadModel:
     model = GPT2LMHeadModel.from_pretrained("gpt2")
     model.eval()
     if device:
@@ -445,41 +314,40 @@ def build_asvd_model(rank_ratio_attn: float, rank_ratio_mlp: float, device: Opti
     for p in model.parameters():
         p.requires_grad = False
     for i, layer in enumerate(model.transformer.h):
-        blk = LowRankSVDBlock(layer, rank_ratio_attn=rank_ratio_attn, rank_ratio_mlp=rank_ratio_mlp, asvd=True)
-        shim = LayerShim(blk, layer_idx=i, asvd=True).to(device if device is not None else next(model.parameters()).device)
+        shim = LayerShim(DenseFlashBlock(layer), layer_idx=i).to(device if device is not None else next(model.parameters()).device)
         model.transformer.h[i] = shim
-    model._uses_asvd_cache = True
+    model._uses_dense_kv = True
     return model
 
 # -------------------------
 # Accurate KV bytes (allocator storage)
 # -------------------------
 @torch.no_grad()
-def estimate_kv_bytes(past_key_values: ASVDCache) -> int:
+def estimate_kv_bytes_dense(cache: DenseKVCache) -> int:
     """
-    Sum UNIQUE storage bytes of all Pk/Pv tensors in ASVDCache.
-    Uses untyped_storage().nbytes() when available.
+    Sum UNIQUE storage bytes of all dense K/V tensors in our DenseKVCache.
+    Uses untyped_storage().nbytes() when available to capture allocator padding.
     """
-    def storage_nbytes(t: torch.Tensor) -> Tuple[int, int]:
+    def storage_key_and_nbytes(t: torch.Tensor):
         try:
             s = t.untyped_storage()
-            return s.data_ptr(), int(s.nbytes())
+            return (s.data_ptr(), int(s.nbytes()))
         except Exception:
             s = t.storage()
             nbytes = (s.nbytes() if hasattr(s, "nbytes") else s.size() * t.element_size())
             ptr = s.data_ptr() if hasattr(s, "data_ptr") else t.data_ptr()
-            return ptr, int(nbytes)
+            return (ptr, int(nbytes))
 
     seen = set()
     total = 0
-    for entry in past_key_values.layers:
+    for entry in cache.layers:
         if entry is None:
             continue
-        Pk, Pv = entry
-        for t in (Pk, Pv):
+        k, v = entry
+        for t in (k, v):
             if t is None or not t.is_cuda:
                 continue
-            key = storage_nbytes(t)
+            key = storage_key_and_nbytes(t)
             if key in seen:
                 continue
             seen.add(key)
@@ -499,10 +367,10 @@ def _next_token_from_last_hidden(model: GPT2LMHeadModel, last_hidden_state: torc
     return torch.multinomial(probs, 1)
 
 # -------------------------
-# Decode benchmark (ASVD only, no big logits)
+# Decode benchmark (Dense+FA only) — no big logits
 # -------------------------
 @torch.no_grad()
-def decode_benchmark_asvd(
+def decode_benchmark_dense(
     model: GPT2LMHeadModel,
     prompt: torch.Tensor,
     new_tokens: int,
@@ -524,29 +392,27 @@ def decode_benchmark_asvd(
         torch.cuda.reset_peak_memory_stats()
         torch.cuda.synchronize()
 
-    # ---- Prefill (cache build) ----
+    # ---- Prefill (build cache, no [B,S,V] logits) ----
     if profiler: profiler.set_phase("prefill")
-    past = ASVDCache(n_layers=len(model.transformer.h))
-    _attach_asvd_cache_to_shims(model, past)
+    kv = DenseKVCache(n_layers=len(model.transformer.h))
+    _attach_dense_cache_to_shims(model, kv)
 
     t0 = time.perf_counter()
-    # ONLY transformer output (no full logits)
-    out = model.transformer(input_ids=prompt, use_cache=True, return_dict=True)
+    out = model.transformer(input_ids=prompt, use_cache=True, return_dict=True)  # only hidden states
     if torch.cuda.is_available(): torch.cuda.synchronize()
     prefill_s = time.perf_counter() - t0
 
-    # Choose first token using ONLY last position logits
+    # choose first token from last position only
     next_id = _next_token_from_last_hidden(model, out.last_hidden_state, greedy=greedy)
 
-    # Memory checkpoints (prefill)
     prefill_peak_mib = torch.cuda.max_memory_allocated() / MiB if torch.cuda.is_available() else 0.0
     prefill_end_alloc_mib = torch.cuda.memory_allocated() / MiB if torch.cuda.is_available() else 0.0
-    _ = estimate_kv_bytes(past) / MiB  # (optional, not printed here)
+    _ = estimate_kv_bytes_dense(kv) / MiB  # optional: not printed here
     if profiler:
         profiler.add_mem_poststep(int(prefill_end_alloc_mib * MiB))
         profiler.set_end_alloc(int(prefill_end_alloc_mib * MiB))
 
-    # Free prefill outputs BEFORE decode measurement
+    # free prefill outputs before measuring decode
     del out
     gc.collect()
     if torch.cuda.is_available():
@@ -554,28 +420,25 @@ def decode_benchmark_asvd(
         torch.cuda.reset_peak_memory_stats()
         torch.cuda.synchronize()
 
-    # ---- Decode loop ----
+    # ---- Decode ----
     if profiler: profiler.set_phase("decode")
 
     t_dec = 0.0
     decode_poststep_peak_mib = 0.0
 
     for _ in range(new_tokens):
-        # feed the token we just picked
         t1 = time.perf_counter()
-        _attach_asvd_cache_to_shims(model, past)
+        _attach_dense_cache_to_shims(model, kv)
         step = model.transformer(input_ids=next_id, use_cache=True, return_dict=True)
         if torch.cuda.is_available(): torch.cuda.synchronize()
         t_dec += (time.perf_counter() - t1)
 
-        # pick next strictly from last position (no [B,S,V])
+        # pick next strictly from last position (avoid [B,S,V])
         next_id = _next_token_from_last_hidden(model, step.last_hidden_state, greedy=greedy)
 
-        # free step outputs promptly
         del step
         gc.collect()
 
-        # Measure allocated *after* the step, which grows with KV
         if torch.cuda.is_available():
             alloc_now_mib = torch.cuda.memory_allocated() / MiB
             if profiler: profiler.add_mem_poststep(int(alloc_now_mib * MiB))
@@ -584,7 +447,7 @@ def decode_benchmark_asvd(
 
     decode_peak_mib = torch.cuda.max_memory_allocated() / MiB if torch.cuda.is_available() else 0.0
     decode_end_alloc_mib = torch.cuda.memory_allocated() / MiB if torch.cuda.is_available() else 0.0
-    kv_final_mib = estimate_kv_bytes(past) / MiB
+    kv_final_mib = estimate_kv_bytes_dense(kv) / MiB
     if profiler:
         profiler.set_end_alloc(int(decode_end_alloc_mib * MiB))
 
@@ -613,7 +476,7 @@ def _fmt_mean_std(vals: List[float], width: int = None, prec: int = 2) -> str:
     return f"{s:>{width}}" if width else s
 
 @torch.no_grad()
-def decode_growth_curve_asvd(
+def decode_growth_curve_dense(
     model: GPT2LMHeadModel,
     tokenizer: AutoTokenizer,
     device: str,
@@ -623,7 +486,7 @@ def decode_growth_curve_asvd(
     rounds: int = 5,
     kv_profile: bool = True,
 ):
-    print(f"\n=== Decoding-time KV-cache growth (ASVD, last-token logits only) — {rounds} rounds avg ===")
+    print(f"\n=== Decoding-time KV-cache growth (Dense+FlashAttn, last-token logits only) — {rounds} rounds avg ===")
     vocab = tokenizer.vocab_size if hasattr(tokenizer, "vocab_size") else 50257
     prompt = torch.randint(0, min(1000, vocab), (batch_size, prompt_len), device=device)
 
@@ -644,7 +507,7 @@ def decode_growth_curve_asvd(
                 torch.cuda.synchronize()
 
             prof = KVProfiler() if kv_profile else None
-            res = decode_benchmark_asvd(model, prompt, new_T, device, profiler=prof, greedy=True)
+            res = decode_benchmark_dense(model, prompt, new_T, device, profiler=prof, greedy=True)
 
             tps.append(res["toks_per_s"])
             pre_ms.append(res["prefill_ms"])
@@ -682,11 +545,9 @@ def decode_growth_curve_asvd(
 # -------------------------
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--rank-ratio-attn", type=float, default=1.0)
-    parser.add_argument("--rank-ratio-mlp",  type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=0)
 
-    # Decode mem benchmark (ASVD only)
+    # Decode mem benchmark (Dense+FA only)
     parser.add_argument("--decode-curve", type=str, default="64,128,256,512")
     parser.add_argument("--decode-batch", type=int, default=1)
     parser.add_argument("--prompt-len", type=int, default=32)
@@ -697,13 +558,10 @@ def main():
     set_seed(args.seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # Build ASVD model
-    print("\n=== Building ASVD Model ===")
-    svd_model = build_asvd_model(rank_ratio_attn=args.rank_ratio_attn,
-                                 rank_ratio_mlp=args.rank_ratio_mlp,
-                                 device=device)
-    first_blk = svd_model.transformer.h[0].block
-    print(f"QKV rank: {first_blk.r_attn}, embed_dim={first_blk.D}, heads={first_blk.H}, dh={first_blk.dh}")
+    print("\n=== Building Dense+FlashAttention Model ===")
+    model = build_dense_fa_model(device=device)
+    blk0 = model.transformer.h[0].block
+    print(f"embed_dim={blk0.D}, heads={blk0.H}, dh={blk0.dh}")
 
     tok = AutoTokenizer.from_pretrained("gpt2")
     tok.pad_token = tok.eos_token
@@ -717,25 +575,11 @@ def main():
         torch.cuda.reset_peak_memory_stats()
         torch.cuda.synchronize()
 
-    decode_growth_curve_asvd(
-        svd_model, tok, device=device,
+    decode_growth_curve_dense(
+        model, tok, device=device,
         batch_size=bsz, prompt_len=p_len, curve_lens=curve,
         rounds=args.rounds, kv_profile=args.kv_profile
     )
 
 if __name__ == "__main__":
     main()
-
-
-'''
-CUDA_VISIBLE_DEVICES=0 \
-python3 profile_asvd_accum_flash.py \
-  --decode-batch 16 \
-  --prompt-len 256 \
-  --decode-curve 128,256 \
-  --rounds 3 \
-  --rank-ratio-attn 0.5 \
-  --rank-ratio-mlp 0.5 \
-  --kv-profile
-
-'''

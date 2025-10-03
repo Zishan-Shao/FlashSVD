@@ -9,8 +9,8 @@ from kernels.utils_mask import _demo_attn_kernel
 # ────────────────────────────────────────────────────────────────────
 # 1. Triton wrapper
 # ────────────────────────────────────────────────────────────────────
-BLOCK_M = 32
-BLOCK_R = 32                      # Triton tile, not the low rank R
+BLOCK_M = 64
+BLOCK_R = 64                      # Triton tile, not the low rank R
 
 def _contig(t): return t.contiguous() if not t.is_contiguous() else t
 

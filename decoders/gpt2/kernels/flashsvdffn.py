@@ -163,7 +163,7 @@ def main():
     # Warm-up
     out_triton = flashsvd_ffn(P, V1, U2, V2, b1, b2, BL, BD, BH, BR1, BR2)
     torch.cuda.synchronize()
-
+    
     # Storage for metrics
     triton_times = []
     triton_mems = []

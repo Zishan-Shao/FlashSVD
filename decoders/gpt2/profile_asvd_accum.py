@@ -13,6 +13,9 @@ NEW (ASVD):
     K  = Pk @ Vk + kb           V  = Pv @ Vv + vb
 - This reduces cache memory from O(T·dh) to O(T·r) per head per stream.
 - Toggle with --asvd (only affects the SVD model; dense baseline still uses HF cache).
+
+TODO: let GPT remove the big logits matrix so the memory measurement will be accurate.
+
 """
 
 import os, math, time, itertools, argparse
