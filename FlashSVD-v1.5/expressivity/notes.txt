@@ -1,0 +1,42 @@
+这里才是最正确的FlashSVDTrain，因为这里我们的方法考虑到了多重混合calibration以及模型的expressivity
+
+
+
+
+按你这条命令，参数作用如下。
+
+| 参数 | 作用 |
+|---|---|
+| `CUDA_VISIBLE_DEVICES=1` | 只让程序看到并使用第 1 块 GPU。 |
+| `python -u` | 关闭输出缓冲，日志实时打印。 |
+| `expressivity/svd_act_lora_full_aligned.py` | 运行你这版“whitening + activation-LoRA + 4 bucket混训”的主脚本。 |
+| `--model meta-llama/Llama-2-7b-hf` | 基座模型。 |
+| `--keep_ratio 0.4` | 全局压缩比例（SVD-LLM 的 rho），越小压缩越狠。 |
+| `--whitening_factorization svd` | whitening 矩阵分解方式，用 SVD-sqrt 路线。 |
+| `--attn_keep_ratio 0.4` | Attention 子模块压缩比例。 |
+| `--mlp_keep_ratio 0.4` | MLP 子模块压缩比例。 |
+| `--whitened_cache ...pt` | whitening+压缩后模型缓存路径，命中可跳过重算。 |
+| `--whitening_lm_datasets wikitext2,ptb,c4` | 用哪些 LM 数据统计 whitening。 |
+| `--lora_nsamples 8192` | LoRA 训练样本总预算（会按 bucket 比例分配）。 |
+| `--seqlen 2048` | 训练序列长度。 |
+| `--train_batch_size 8` | LoRA 更新时每步 batch size。 |
+| `--epochs 3` | LoRA 训练轮数。 |
+| `--lr 1.5e-4` | LoRA 学习率。 |
+| `--lora_rank 32` | LoRA 低秩维度。 |
+| `--lora_alpha 32` | LoRA 缩放系数。 |
+| `--mix_buckets` | 开启多桶混合训练（LM/INST/MCQ/MATH）。 |
+| `--bucket_props LM:0.4,INST:0.2,MCQ:0.25,MATH:0.15` | 四个桶的采样比例。 |
+| `--bucket_lm_datasets ...` | LM 桶数据源（full-seq CE，稳 PPL）。 |
+| `--bucket_inst_datasets ...` | 指令桶数据源（masked SFT CE）。 |
+| `--bucket_mcq_datasets ...` | MCQ 桶数据源（option-ranking loss，不学输出 A/B 模板）。 |
+| `--bucket_math_datasets ...` | 数学桶数据源。 |
+| `--bucket_loss_weights LM:1.0,INST:1.0,MCQ:0.6,MATH:0.8` | 各桶 loss 权重。 |
+| `--mcq_rank_tau 12` | MCQ ranking softmax 温度，越大越平滑。 |
+| `--mcq_prompt_cutoff_len 320` | MCQ prompt 最大 token 长度。 |
+| `--mcq_option_cutoff_len 128` | MCQ 每个选项 continuation 最大 token 长度。 |
+| `--sft_label_smoothing 0.03` | 仅对 masked SFT 桶做 label smoothing（LM/MCQ 不用）。 |
+| `--eval_datasets wikitext2,ptb,c4` | 训练前后 PPL 评估数据集。 |
+| `--save_path ...pt` | 最终保存模型路径。 |
+
+你这条里有一个小点要注意：  
+`--keep_ratio 0.4`，但 `--whitened_cache` 文件名写的是 `0.6`。脚本会做一致性检查，不匹配时通常会重算；建议把 cache 路径名改成 `0.4`，避免混淆。
