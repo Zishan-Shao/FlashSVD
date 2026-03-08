@@ -1,4 +1,18 @@
+#!/usr/bin/env python3
+"""
+Legacy/compatibility MLP kernel sandbox.
+
+Active exact dual-split serving code has been split into
+`kernels/flashsvdsilu/dual_split_exact.py`.
+
+This file is intentionally kept for:
+- old generic SwiGLU experiments
+- approximate/shared-P experiments
+- one-off profiling helpers
+- legacy benchmarks that still import `kernels.flashsvdswiglu`
+"""
 import math
+import os
 import statistics as stats
 import argparse
 import torch
@@ -9,11 +23,12 @@ import torch.nn.functional as F
 DECODE_MAX_BATCH = 4
 DECODE_MAX_SEQ = 4
 DECODE_MAX_R2 = 2048
+SHARED_SPLIT_TOKEN_MAX_BATCH = 4
+SHARED_SPLIT_TOKEN_MAX_SEQ = 4
 
 # ==============================================================
 # Triton kernels (SwiGLU in rank space, P -> S in one shot)
 # ==============================================================
-
 @triton.jit
 def _fused_ffn_phase1_swiglu_base(
     P_ptr, V1_ptr, U2_ptr, S_ptr, b1_ptr,
@@ -104,30 +119,21 @@ TUNE_FFN_SWIGLU = [
     triton.Config({'BL': 64,  'BD': 64,  'BR1': 64,  'BR2': 64},  num_warps=4, num_stages=2),
     triton.Config({'BL': 64,  'BD': 128, 'BR1': 64,  'BR2': 64},  num_warps=4, num_stages=2),
     triton.Config({'BL': 16,  'BD': 128, 'BR1': 64,  'BR2': 256}, num_warps=8, num_stages=2),
-    triton.Config({'BL': 32,  'BD': 128, 'BR1': 64,  'BR2': 128}, num_warps=4, num_stages=2),
-    triton.Config({'BL': 32,  'BD': 128, 'BR1': 64,  'BR2': 128}, num_warps=8, num_stages=2),
     triton.Config({'BL': 64,  'BD': 128, 'BR1': 64,  'BR2': 128}, num_warps=8, num_stages=2),
     triton.Config({'BL': 128, 'BD': 128, 'BR1': 64,  'BR2': 128}, num_warps=8, num_stages=2),
     # Larger BR2 reduces recompute of the expensive P@V1 + activation work across R2 tiles.
     triton.Config({'BL': 64,  'BD': 128, 'BR1': 64,  'BR2': 256}, num_warps=8, num_stages=2),
     triton.Config({'BL': 32,  'BD': 128, 'BR1': 64,  'BR2': 256}, num_warps=8, num_stages=2),
     # "R2-resident" configs: if BR2 >= R2, pid_r2 grid becomes 1 -> avoids recomputing P@V1+SwiLU per R2-tile.
-    # This is the closest analog to the Vk-resident idea in decode kernels.
     triton.Config({'BL': 32,  'BD': 128, 'BR1': 64,  'BR2': 512}, num_warps=8, num_stages=3),
-    triton.Config({'BL': 32,  'BD': 128, 'BR1': 64,  'BR2': 512}, num_warps=4, num_stages=2),
     triton.Config({'BL': 16,  'BD': 128, 'BR1': 64,  'BR2': 512}, num_warps=4, num_stages=3),
     # Larger BR1 reduces the number of r1 loop iterations when R1 is large.
     triton.Config({'BL': 64,  'BD': 128, 'BR1': 128, 'BR2': 128}, num_warps=8, num_stages=2),
-    triton.Config({'BL': 32,  'BD': 128, 'BR1': 128, 'BR2': 128}, num_warps=8, num_stages=2),
     triton.Config({'BL': 16,  'BD': 128, 'BR1': 128, 'BR2': 256}, num_warps=8, num_stages=2),
-    triton.Config({'BL': 32,  'BD': 128, 'BR1': 128, 'BR2': 256}, num_warps=8, num_stages=2),
-    triton.Config({'BL': 32,  'BD': 128, 'BR1': 128, 'BR2': 512}, num_warps=8, num_stages=3),
-    triton.Config({'BL': 32,  'BD': 128, 'BR1': 128, 'BR2': 512}, num_warps=4, num_stages=2),
     # Larger tiles can OOR on some GPUs; add cautiously:
     # triton.Config({'BL': 128, 'BD': 256, 'BR1': 128, 'BR2': 128}, num_warps=8, num_stages=2),
 ]
 
-# Decode is typically L=1; include L in the key so autotune can pick a different schedule vs prefill.
 @triton.autotune(configs=TUNE_FFN_SWIGLU, key=['D', 'R1', 'R2', 'L'])
 @triton.jit
 def fused_ffn_phase1_swiglu_auto(
@@ -161,9 +167,6 @@ def fused_ffn_phase1_swiglu_auto(
 # ==============================================================
 
 def _pick_decode_config(R1: int, R2: int) -> dict[str, int]:
-    # For Llama-2-7B-like half-rank decode (R ~= 1.5k), true single-tile R2 residency is not
-    # practical on current GPUs. This schedule instead reduces the R2 grid and raises BR1 to
-    # cut the number of expensive gated recomputations while staying within shared-memory limits.
     if max(R1, R2) >= 1024:
         return {'BL': 16, 'BD': 128, 'BR1': 128, 'BR2': 256, 'warps': 8, 'stages': 2}
     if R2 <= 256:
@@ -218,9 +221,6 @@ def flashsvd_ffn_swiglu(
         )
 
     if use_decode_specialized:
-        # Decode-first path: pin a schedule that uses wider R2 tiles than the generic path.
-        # On small ranks this can collapse pid_r2 to 1; on larger half-rank Llama MLPs it
-        # still materially reduces the number of P@V1 + gating recomputations.
         cfg = _pick_decode_config(R1, R2)
         grid = (B, triton.cdiv(L, cfg['BL']), triton.cdiv(R2, cfg['BR2']))
         _fused_ffn_phase1_swiglu_base[grid](
@@ -268,11 +268,8 @@ def flashsvd_ffn_swiglu(
             num_stages=num_stages,
         )
 
-    # Decode-friendly epilogue: flatten (B,L) -> (B*L) and use addmm to fuse bias into GEMM.
-    # This avoids a separate bias-add kernel and tends to be faster than (B,L,R2) @ (R2,H) batched matmul
-    # when L is small (e.g., L=1).
     S2d = S.reshape(B * L, R2)
-    Y2d = torch.addmm(b2, S2d, V2)  # [B*L, H]
+    Y2d = torch.addmm(b2, S2d, V2)
     Y = Y2d.reshape(B, L, H)
     return Y
 
@@ -372,19 +369,12 @@ def manual_profile(P, V1, U2, V2, b1, b2):
         {'BL': 32,  'BD': 64,  'BR1': 64,  'BR2': 64,  'warps': 4, 'stages': 2},
         {'BL': 64,  'BD': 64,  'BR1': 64,  'BR2': 64,  'warps': 4, 'stages': 2},
         {'BL': 64,  'BD': 128, 'BR1': 64,  'BR2': 64,  'warps': 4, 'stages': 2},
-        {'BL': 32,  'BD': 128, 'BR1': 64,  'BR2': 128, 'warps': 4, 'stages': 2},
-        {'BL': 32,  'BD': 128, 'BR1': 64,  'BR2': 128, 'warps': 8, 'stages': 2},
         {'BL': 64,  'BD': 128, 'BR1': 64,  'BR2': 128, 'warps': 8, 'stages': 2},
         {'BL': 128, 'BD': 128, 'BR1': 64,  'BR2': 128, 'warps': 8, 'stages': 2},
         {'BL': 64,  'BD': 128, 'BR1': 64,  'BR2': 256, 'warps': 8, 'stages': 2},
         {'BL': 32,  'BD': 128, 'BR1': 64,  'BR2': 512, 'warps': 8, 'stages': 3},
-        {'BL': 32,  'BD': 128, 'BR1': 64,  'BR2': 512, 'warps': 4, 'stages': 2},
         {'BL': 16,  'BD': 128, 'BR1': 64,  'BR2': 512, 'warps': 4, 'stages': 3},
         {'BL': 64,  'BD': 128, 'BR1': 128, 'BR2': 128, 'warps': 8, 'stages': 2},
-        {'BL': 32,  'BD': 128, 'BR1': 128, 'BR2': 128, 'warps': 8, 'stages': 2},
-        {'BL': 32,  'BD': 128, 'BR1': 128, 'BR2': 256, 'warps': 8, 'stages': 2},
-        {'BL': 32,  'BD': 128, 'BR1': 128, 'BR2': 512, 'warps': 8, 'stages': 3},
-        {'BL': 32,  'BD': 128, 'BR1': 128, 'BR2': 512, 'warps': 4, 'stages': 2},
     ]
     print("\n=== Manual profile over selected configs ===")
     results = []
@@ -455,7 +445,7 @@ def main():
     _ = flashsvd_ffn_swiglu(P, V1, U2, V2, b1, b2, use_autotune=True)
     torch.cuda.synchronize()
     try:
-        print("\nAutotune best config (v1.5):", fused_ffn_phase1_swiglu_auto.best_config)
+        print("\nAutotune best config:", fused_ffn_phase1_swiglu_auto.best_config)
     except Exception:
         pass
 
@@ -520,32 +510,6 @@ def main():
           f"mean {triton_stats['mean_ms']:.2f} ms | p50 {triton_stats['p50_ms']:.2f} | p95 {triton_stats['p95_ms']:.2f} "
           f"| {tps(triton_stats['mean_ms']):,.0f} tok/s")
 
-    # ---- optional: compare against v1 implementation (same folder) ----
-    try:
-        import flashsvdswiglu_v1 as sw1  # noqa: WPS433
-        flashsvd_ffn_swiglu_v1 = sw1.flashsvd_ffn_swiglu
-
-        # warm compile (v1)
-        _ = flashsvd_ffn_swiglu_v1(P, V1, U2, V2, b1, b2, use_autotune=True)
-        torch.cuda.synchronize()
-        try:
-            print("Autotune best config (v1):", sw1.fused_ffn_phase1_swiglu_auto.best_config)
-        except Exception:
-            pass
-
-        v1_stats = bench(lambda: flashsvd_ffn_swiglu_v1(P, V1, U2, V2, b1, b2, use_autotune=True),
-                         n_warmup=args.warmup, n_runs=args.iters)
-
-        speedup = v1_stats["mean_ms"] / triton_stats["mean_ms"]
-        print("\n=== Kernel A/B (v1 vs v1.5) ===")
-        print("v1 (Triton):   "
-              f"mean {v1_stats['mean_ms']:.2f} ms | p50 {v1_stats['p50_ms']:.2f} | p95 {v1_stats['p95_ms']:.2f}")
-        print("v1.5 (Triton): "
-              f"mean {triton_stats['mean_ms']:.2f} ms | p50 {triton_stats['p50_ms']:.2f} | p95 {triton_stats['p95_ms']:.2f}")
-        print(f"Speedup (v1 → v1.5): {speedup:.2f}x")
-    except Exception as e:
-        print("\n[v1 compare] skipped:", e)
-
     # ---- optional: manual config sweep (pinned) ----
     if args.profile:
         _ = manual_profile(P, V1, U2, V2, b1, b2)
@@ -553,175 +517,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# #!/usr/bin/env python3
-# import torch
-# import triton
-# import triton.language as tl
-# import torch.nn.functional as F
-
-# # -----------------------------
-# # Triton kernel (SwiGLU in rank space)
-# # -----------------------------
-# @triton.jit
-# def fused_ffn_phase1_swiglu(
-#     P_ptr, V1_ptr, U2_ptr, S_ptr, b1_ptr,
-#     B, L, D, R1, R2,
-#     sP_b, sP_l, sP_r1,
-#     sV1_r1, sV1_d,
-#     sU2_d, sU2_r2,
-#     sb1,
-#     sS_b, sS_l, sS_r2,
-#     BL: tl.constexpr, BD: tl.constexpr, BR1: tl.constexpr, BR2: tl.constexpr,
-# ):
-#     pid_b  = tl.program_id(0)
-#     pid_l  = tl.program_id(1)
-#     pid_r2 = tl.program_id(2)
-
-#     offs_l  = pid_l * BL + tl.arange(0, BL)
-#     offs_r2 = pid_r2 * BR2 + tl.arange(0, BR2)
-
-#     Tu_acc = tl.zeros((BL, BD), dtype=tl.float32)
-#     Tv_acc = tl.zeros((BL, BD), dtype=tl.float32)
-#     acc    = tl.zeros((BL, BR2), dtype=tl.float32)
-
-#     for d0 in range(0, D, BD):
-#         d   = d0 + tl.arange(0, BD)
-#         m_d = d < D
-
-#         Tu_acc *= 0.0
-#         Tv_acc *= 0.0
-
-#         for r1_0 in range(0, R1, BR1):
-#             r1   = r1_0 + tl.arange(0, BR1)
-#             m_r1 = r1 < R1
-
-#             P_blk = tl.load(
-#                 P_ptr + pid_b * sP_b + offs_l[:, None]*sP_l + r1[None, :]*sP_r1,
-#                 mask=(offs_l[:, None] < L) & m_r1[None, :],
-#                 other=0.0
-#             )
-
-#             V1u_blk = tl.load(
-#                 V1_ptr + r1[:, None]*sV1_r1 + d[None, :]*sV1_d,
-#                 mask=m_r1[:, None] & m_d[None, :],
-#                 other=0.0
-#             )
-
-#             V1v_blk = tl.load(
-#                 V1_ptr + r1[:, None]*sV1_r1 + (d[None, :] + D)*sV1_d,
-#                 mask=m_r1[:, None] & m_d[None, :],
-#                 other=0.0
-#             )
-
-#             Tu_acc += tl.dot(P_blk, V1u_blk)
-#             Tv_acc += tl.dot(P_blk, V1v_blk)
-
-#         b1u = tl.load(b1_ptr + d*sb1,        mask=m_d, other=0.0).to(tl.float32)
-#         b1v = tl.load(b1_ptr + (d + D)*sb1,  mask=m_d, other=0.0).to(tl.float32)
-#         Tu  = Tu_acc + b1u[None, :]
-#         Tv  = Tv_acc + b1v[None, :]
-
-#         # SwiGLU: silu(Tu) * Tv, where silu(z) = z * sigmoid(z)
-#         Hu = Tu * (1.0 / (1.0 + tl.exp(-Tu)))
-#         H  = Hu * Tv
-
-#         U2_blk = tl.load(
-#             U2_ptr + d[:, None]*sU2_d + offs_r2[None, :]*sU2_r2,
-#             mask=m_d[:, None] & (offs_r2[None, :] < R2),
-#             other=0.0
-#         ).to(tl.float32)
-#         acc += tl.dot(H, U2_blk)
-
-#     mask = (offs_l[:, None] < L) & (offs_r2[None, :] < R2)
-#     tl.store(
-#         S_ptr + pid_b*sS_b + offs_l[:, None]*sS_l + offs_r2[None, :]*sS_r2,
-#         acc, mask=mask
-#     )
-
-
-# # -----------------------------
-# # Wrapper
-# # -----------------------------
-# def flashsvd_ffn_swiglu(
-#     P, V1, U2, V2, b1, b2,
-#     BL=64, BD=64, BR1=64, BR2=64,
-#     *, store_s_fp32: bool = False,
-# ):
-#     assert P.is_cuda and V1.is_cuda and U2.is_cuda and V2.is_cuda
-#     B, L, R1 = P.shape
-#     R1_v1, twoD = V1.shape
-#     D = twoD // 2
-#     assert R1_v1 == R1 and twoD == 2 * D
-#     D_u2, R2 = U2.shape
-#     assert D_u2 == D
-#     R2_v2, H = V2.shape
-#     assert R2_v2 == R2
-#     assert b1.shape[0] == 2*D and b2.shape[0] == H
-
-#     S_dtype = torch.float32 if store_s_fp32 else P.dtype
-#     S = torch.empty((B, L, R2), device=P.device, dtype=S_dtype)
-
-#     strides = dict(
-#         sP_b=P.stride(0), sP_l=P.stride(1), sP_r1=P.stride(2),
-#         sV1_r1=V1.stride(0), sV1_d=V1.stride(1),
-#         sU2_d=U2.stride(0), sU2_r2=U2.stride(1),
-#         sb1=b1.stride(0),
-#         sS_b=S.stride(0), sS_l=S.stride(1), sS_r2=S.stride(2),
-#     )
-
-#     grid = (B, triton.cdiv(L, BL), triton.cdiv(R2, BR2))
-#     fused_ffn_phase1_swiglu[grid](
-#         P, V1, U2, S, b1,
-#         B, L, D, R1, R2,
-#         *strides.values(),
-#         BL, BD, BR1, BR2,
-#     )
-
-#     Y = S.matmul(V2)
-#     Y = Y + b2.view(1, 1, -1)
-#     return Y
-
-
-# # -----------------------------
-# # PyTorch reference
-# # -----------------------------
-# def _pt_baseline_swiglu(P, V1, U2, V2, b1, b2):
-#     Z  = P.matmul(V1) + b1.view(1, 1, -1)
-#     Zu, Zv = Z.split(Z.shape[-1] // 2, dim=-1)
-#     H  = F.silu(Zu) * Zv
-#     S  = H.matmul(U2)
-#     Y  = S.matmul(V2) + b2.view(1, 1, -1)
-#     return Y

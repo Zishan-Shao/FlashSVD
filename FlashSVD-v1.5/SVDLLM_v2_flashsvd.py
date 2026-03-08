@@ -8,13 +8,13 @@ import torch.nn as nn
 from tqdm import tqdm
 
 from utils.model_utils import find_layers
-from component.svd_llama import (
+from flashsvd_component.svd_llama import (
     SVD_LlamaAttention,
     SVD_LlamaMLP,
     enable_flashsvd_llama_layer_tail_cuda_graph,
 )
-from component.svd_mistral import SVD_MistralAttention, SVD_MistralMLP
-from component.svd_opt import SVDOPTDecoderLayer
+from flashsvd_component.svd_mistral import SVD_MistralAttention, SVD_MistralMLP
+from flashsvd_component.svd_opt import SVDOPTDecoderLayer
 
 current_path = os.path.dirname(os.path.abspath(__file__))
 parent_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -410,3 +410,27 @@ def whitening_hetero(
         del layer
         if str(dev).startswith("cuda"):
             torch.cuda.empty_cache()
+
+
+def main() -> int:
+    """Delegate runtime decode benchmarking to the shared FlashSVD benchmark entrypoint.
+
+    This keeps the v2 compression utilities in this file while exposing a simple
+    CLI for llama-7b checkpoint inference-speed tests:
+
+        python SVDLLM_v2_flashsvd.py --checkpoint <ckpt> ...
+    """
+
+    from bench_flashsvd_vs_svd_decode import main as bench_main
+
+    # This file imports and enables the HF decoder-layer graph patch eagerly.
+    # Keep the wrapper conservative: default to the MLP-only graph scope unless
+    # the caller explicitly overrides it.
+    if "--mlp_cuda_graph_scope" not in sys.argv:
+        sys.argv.extend(["--mlp_cuda_graph_scope", "mlp"])
+
+    return int(bench_main())
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

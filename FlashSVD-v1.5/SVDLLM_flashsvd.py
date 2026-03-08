@@ -8,7 +8,11 @@ import torch
 import torch.nn as nn
 
 from utils.data_utils import *
-from flashsvd_component.svd_llama import SVD_LlamaAttention, SVD_LlamaMLP
+from flashsvd_component.svd_llama import (
+    SVD_LlamaAttention,
+    SVD_LlamaMLP,
+    enable_flashsvd_llama_layer_tail_cuda_graph,
+)
 from flashsvd_component.svd_mistral import SVD_MistralAttention, SVD_MistralMLP
 from flashsvd_component.svd_opt import SVDOPTDecoderLayer
 from utils.model_utils import *
@@ -17,6 +21,18 @@ from evaluater import *
 current_path = os.path.dirname(os.path.abspath(__file__))
 parent_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(current_path)
+enable_flashsvd_llama_layer_tail_cuda_graph()
+
+
+def _backend_needs_experimental_ffn(backend: str) -> bool:
+    raw = str(backend).strip().lower()
+    return raw in {
+        "dual_split_cublas",
+        "dual_split_kernel",
+        "dual_split_kernel_v2",
+        "dual_split_kernel_v2_sm80",
+        "dual_split_kernel_v3",
+    }
 
 
 
@@ -562,7 +578,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--model', type=str, default='jeffwan/llama-7b-hf', help='LLaMA model to load, pass `jeffwan/llama-7b-hf`')
     parser.add_argument('--model_path', type=str, default=None, help='local compressed model path or whitening information path')
-    parser.add_argument('--ratio', type=float, default=0.2, help='Target compression ratio,(0,1), default=0.2, means only keeping about 20% of the params.')
+    parser.add_argument('--ratio', type=float, default=0.2, help='Target compression ratio,(0,1), default=0.2, means only keeping about 20%% of the params.')
     parser.add_argument('--run_low_resource', action='store_true', help='whether to run whitening in low resource, exp, compress LLaMA-7B below 15G gpu')
     parser.add_argument('--dataset', type=str, default='wikitext2',help='Where to extract calibration data from [wikitext2, ptb, c4]')
     parser.add_argument('--whitening_nsamples', type=int, default=256, help='Number of calibration data samples for whitening.')
@@ -578,9 +594,44 @@ if __name__ == '__main__':
     parser.add_argument('--prompt_len', type=int, default=2048, help='prompt length for KV-cache decode benchmark (step=6)')
     parser.add_argument('--new_tokens', type=int, default=128, help='number of decode steps for KV-cache benchmark (step=6)')
     parser.add_argument('--decode_warmup', type=int, default=5, help='warmup decode steps for KV-cache benchmark (step=6)')
+    parser.add_argument('--max_cache_len', type=int, default=0, help='override max KV cache length for step=6 (<=0 uses prompt+warmup+new_tokens+1)')
     parser.add_argument('--lowrank_cache', action='store_true', help='Use LowRankKVCache for step=6 (FlashSVD models only)')
+    parser.add_argument(
+        '--flashsvd_dense_cache',
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help='Enable FlashSVD dense-KV decode path for step=6 (low-rank weights + dense KV cache + FA2).',
+    )
     parser.add_argument('--baseline_lowrank_cache', action='store_true', help='Use LowRankKVCache but compute attention with SDPA (no FlashSVD attention kernels) for step=6')
+    parser.add_argument('--baseline_dense_kvcache', action='store_true', help='Use dense KV cache for step=6, but compute Q/K/V with reference PyTorch low-rank reconstruction before RoPE + FA2.')
     parser.add_argument('--disable_flash_ffn', action='store_true', help='Disable FlashSVD fused SwiGLU FFN kernel (keep FlashSVD attention)')
+    parser.add_argument('--reference_dense_attn', action='store_true', help='Force full-sequence attention to use explicit low-rank reconstruction + RoPE + SDPA for aligned eval/correctness.')
+    parser.add_argument(
+        '--flashsvd_mlp_cuda_graph',
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help='Enable CUDA Graph for FlashSVD MLP decode fast path.',
+    )
+    parser.add_argument(
+        '--flashsvd_mlp_graph_scope',
+        type=str,
+        default='mlp',
+        choices=['auto', 'mlp', 'layer_tail'],
+        help='CUDA Graph scope for FlashSVD MLP benchmarking.',
+    )
+    parser.add_argument(
+        '--flashsvd_mlp_graph_alias_output',
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help='Allow FlashSVD CUDA Graph MLP path to return the static graph output buffer directly to avoid an extra clone.',
+    )
+    parser.add_argument(
+        '--flashsvd_ffn_backend',
+        type=str,
+        default='auto',
+        choices=['auto', 'dual_split_cublas', 'dual_split_cublas_legacy', 'dual_split_kernel', 'dual_split_kernel_v2', 'dual_split_kernel_v2_sm80', 'dual_split_kernel_v3'],
+        help='Decode-time exact FlashSVD FFN backend for SVD_LlamaMLP.',
+    )
     parser.add_argument('--mha_stream', action='store_true', help='Enable MHA streamed decode path for LowRankKVCache (REP=1): avoids SDPA peak memory and avoids per-head kernel overhead')
     parser.add_argument('--profile_decode', action='store_true', help='Profile decode latency breakdown in step=6 (prints per-module CUDA time)')
     parser.add_argument('--profile_decode_steps', type=int, default=20, help='Number of decode steps to profile (step=6)')
@@ -593,13 +644,28 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     args.ratio = 1 - args.ratio
+    if bool(args.lowrank_cache):
+        args.flashsvd_dense_cache = False
     if bool(args.baseline_lowrank_cache):
         # Baseline mode implies LowRankKVCache storage (but disables FlashSVD attention kernels).
         args.lowrank_cache = True
+        args.flashsvd_dense_cache = False
+        args.baseline_dense_kvcache = False
+    if bool(args.baseline_dense_kvcache):
+        args.lowrank_cache = False
+        args.flashsvd_dense_cache = False
     set_env_flag("FLASH_SVD_DISABLE_FFN", bool(args.disable_flash_ffn))
     set_env_flag("FLASH_SVD_BASELINE_LR_KVCACHE", bool(args.baseline_lowrank_cache))
+    set_env_flag("FLASH_SVD_BASELINE_DENSE_KVCACHE", bool(args.baseline_dense_kvcache))
     set_env_flag("FLASH_SVD_DECODE_MHA_STREAM", bool(args.mha_stream))
     set_env_flag("FLASH_SVD_PROFILE_ATTN_DECODE", bool(args.profile_attn_decode))
+    set_env_flag("FLASH_SVD_MLP_CUDA_GRAPH", bool(args.flashsvd_mlp_cuda_graph))
+    set_env_flag("FLASH_SVD_MLP_CUDA_GRAPH_ALIAS_OUTPUT", bool(args.flashsvd_mlp_graph_alias_output))
+    set_env_flag("FLASH_SVD_ENABLE_EXPERIMENTAL_FFN", _backend_needs_experimental_ffn(args.flashsvd_ffn_backend))
+    set_env_flag("FLASH_SVD_REFERENCE_DENSE_ATTN", bool(args.reference_dense_attn))
+    os.environ["FLASH_SVD_FFN_BACKEND"] = str(args.flashsvd_ffn_backend)
+    os.environ["FLASH_SVD_MLP_CUDA_GRAPH_SCOPE"] = str(args.flashsvd_mlp_graph_scope)
+    set_env_flag("FLASH_SVD_ENABLE_DENSE_ATTN_DECODE", bool(args.flashsvd_dense_cache))
     if bool(args.profile_attn_decode):
         os.environ["FLASH_SVD_PROFILE_ATTN_LAYER"] = str(int(args.profile_attn_layer))
         os.environ["FLASH_SVD_PROFILE_ATTN_STEPS"] = str(int(args.profile_attn_steps))
@@ -679,14 +745,18 @@ if __name__ == '__main__':
         elif args.step == 5:
             eff_eval(model, tokenizer, generated_len=args.gen_seq_len, batch_size=args.eval_batch_size, device=args.DEV)
         elif args.step == 6:
+            max_cache_len = int(args.max_cache_len) if int(args.max_cache_len) > 0 else None
             decode_kvcache_eval(
                 model,
                 prompt_len=args.prompt_len,
                 new_tokens=args.new_tokens,
                 warmup=args.decode_warmup,
+                max_cache_len=max_cache_len,
                 batch_size=args.eval_batch_size,
                 device=args.DEV,
                 lowrank_cache=bool(args.lowrank_cache),
+                flashsvd_dense_cache=bool(args.flashsvd_dense_cache),
+                baseline_dense_kvcache=bool(args.baseline_dense_kvcache),
                 profile_decode=bool(args.profile_decode),
                 profile_decode_steps=int(args.profile_decode_steps),
             )

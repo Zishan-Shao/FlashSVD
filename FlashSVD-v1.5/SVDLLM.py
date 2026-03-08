@@ -8,7 +8,11 @@ import torch
 import torch.nn as nn
 
 from utils.data_utils import *
-from component.svd_llama import SVD_LlamaAttention, SVD_LlamaMLP
+from component.svd_llama import (
+    SVD_LlamaAttention,
+    SVD_LlamaMLP,
+    enable_flashsvd_llama_layer_tail_cuda_graph,
+)
 from component.svd_mistral import SVD_MistralAttention, SVD_MistralMLP
 from component.svd_opt import SVDOPTDecoderLayer
 from utils.model_utils import *
@@ -17,6 +21,7 @@ from evaluater import *
 current_path = os.path.dirname(os.path.abspath(__file__))
 parent_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(current_path)
+enable_flashsvd_llama_layer_tail_cuda_graph()
 
 
 def _compat_enabled(key: str, default: bool = False) -> bool:

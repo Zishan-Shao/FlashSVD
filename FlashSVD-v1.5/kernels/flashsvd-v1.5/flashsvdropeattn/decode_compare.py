@@ -29,7 +29,139 @@ import inspect
 import math
 import os
 import time
+from dataclasses import dataclass
 from typing import Callable, Optional, Tuple
+
+
+@dataclass(frozen=True)
+class LlamaPreset:
+    hidden_size: int
+    num_heads: int
+    num_kv_heads: int
+
+    @property
+    def head_dim(self) -> int:
+        if self.hidden_size % self.num_heads != 0:
+            raise ValueError(f"Invalid preset: hidden_size={self.hidden_size} is not divisible by num_heads={self.num_heads}")
+        return self.hidden_size // self.num_heads
+
+
+LLAMA_PRESETS: dict[str, LlamaPreset] = {
+    "llama2-7b": LlamaPreset(hidden_size=4096, num_heads=32, num_kv_heads=32),
+    "llama2-13b": LlamaPreset(hidden_size=5120, num_heads=40, num_kv_heads=40),
+    "llama2-70b": LlamaPreset(hidden_size=8192, num_heads=64, num_kv_heads=8),
+    "llama3-8b": LlamaPreset(hidden_size=4096, num_heads=32, num_kv_heads=8),
+    "llama3-70b": LlamaPreset(hidden_size=8192, num_heads=64, num_kv_heads=8),
+    "llama3.1-8b": LlamaPreset(hidden_size=4096, num_heads=32, num_kv_heads=8),
+    "llama3.1-70b": LlamaPreset(hidden_size=8192, num_heads=64, num_kv_heads=8),
+}
+
+
+def _format_llama_presets() -> str:
+    lines = ["Available --llama presets:"]
+    for name in sorted(LLAMA_PRESETS):
+        p = LLAMA_PRESETS[name]
+        lines.append(
+            f"- {name}: hidden_size={p.hidden_size}, H={p.num_heads}, Hk={p.num_kv_heads}, Dh={p.head_dim}"
+        )
+    return "\n".join(lines)
+
+
+def _round_rank(raw_rank: float, multiple: int, mode: str) -> int:
+    if raw_rank <= 0:
+        return 1
+    if multiple <= 1:
+        if mode == "down":
+            return max(1, int(math.floor(raw_rank)))
+        if mode == "up":
+            return max(1, int(math.ceil(raw_rank)))
+        return max(1, int(round(raw_rank)))
+
+    q = raw_rank / float(multiple)
+    if mode == "down":
+        q_int = math.floor(q)
+    elif mode == "up":
+        q_int = math.ceil(q)
+    else:
+        q_int = int(round(q))
+
+    out = int(q_int * multiple)
+    if out <= 0:
+        out = int(multiple)
+    return out
+
+
+def _ceil_div(a: int, b: int) -> int:
+    return (a + b - 1) // b
+
+
+def _parse_csv_ints(text: str) -> list[int]:
+    return [int(x) for x in text.split(",") if x.strip()]
+
+
+def _best_lowrank_result(
+    results: list[tuple[str, float, float, int, int, int, int]]
+) -> Optional[tuple[str, float, float, int, int, int, int]]:
+    fused = [r for r in results if r[0].startswith("lowrank_fused")]
+    if fused:
+        return min(fused, key=lambda x: x[1])
+    stream = [r for r in results if r[0].startswith("lowrank_kvcache(")]
+    if stream:
+        return min(stream, key=lambda x: x[1])
+    return None
+
+
+def _rank_from_param_ratio(
+    *,
+    hidden_size: int,
+    num_kv_heads: int,
+    head_dim: int,
+    target_ratio: float,
+    mode: str,
+) -> float:
+    """
+    Infer rank R from target parameter ratio.
+
+    mode="headwise":
+      dense  = 2 * Hk * hidden_size * Dh
+      lowrank= 2 * Hk * R * (hidden_size + Dh)
+      ratio  = lowrank / dense
+
+    mode="global":
+      dense  = 2 * hidden_size * (Hk*Dh)
+      lowrank= 2 * R * (hidden_size + Hk*Dh)
+      ratio  = lowrank / dense
+    """
+    if hidden_size <= 0 or num_kv_heads <= 0 or head_dim <= 0:
+        raise ValueError(
+            f"Invalid dimensions for rank inference: hidden_size={hidden_size}, Hk={num_kv_heads}, Dh={head_dim}"
+        )
+    if not (0.0 < target_ratio <= 1.0):
+        raise ValueError(f"--target-param-ratio must be in (0, 1], got {target_ratio}")
+    kv_dim = num_kv_heads * head_dim
+    if mode == "headwise":
+        return target_ratio * hidden_size * head_dim / float(hidden_size + head_dim)
+    if mode == "global":
+        return target_ratio * hidden_size * kv_dim / float(hidden_size + kv_dim)
+    raise ValueError(f"Unknown rank formula mode: {mode}")
+
+
+def _param_ratio_from_rank(
+    *,
+    hidden_size: int,
+    num_kv_heads: int,
+    head_dim: int,
+    rank: int,
+    mode: str,
+) -> float:
+    if hidden_size <= 0 or num_kv_heads <= 0 or head_dim <= 0 or rank <= 0:
+        return float("nan")
+    kv_dim = num_kv_heads * head_dim
+    if mode == "headwise":
+        return (rank * (hidden_size + head_dim)) / float(hidden_size * head_dim)
+    if mode == "global":
+        return (rank * (hidden_size + kv_dim)) / float(hidden_size * kv_dim)
+    return float("nan")
 
 
 def _bench_ms(fn: Callable[[], object], *, warmup: int, iters: int) -> float:
@@ -50,16 +182,33 @@ def _bench_ms(fn: Callable[[], object], *, warmup: int, iters: int) -> float:
         return (time.perf_counter() - t0) * 1000.0 / max(1, iters)
 
 
-def _isolated_peak_bytes(fn: Callable[[], object]) -> tuple[int, int]:
+def _reset_cuda_memory_state() -> None:
     import torch
 
     torch.cuda.synchronize()
     gc.collect()
     torch.cuda.empty_cache()
+    if hasattr(torch.cuda, "ipc_collect"):
+        try:
+            torch.cuda.ipc_collect()
+        except Exception:
+            pass
+
+
+def _isolated_peak_bytes(fn: Callable[[], object]) -> tuple[int, int, int, int]:
+    import torch
+
+    _reset_cuda_memory_state()
+    base_alloc = int(torch.cuda.memory_allocated())
+    base_reserved = int(torch.cuda.memory_reserved())
     torch.cuda.reset_peak_memory_stats()
     _ = fn()
     torch.cuda.synchronize()
-    return int(torch.cuda.max_memory_allocated()), int(torch.cuda.max_memory_reserved())
+    peak_alloc = int(torch.cuda.max_memory_allocated())
+    peak_reserved = int(torch.cuda.max_memory_reserved())
+    delta_alloc = max(0, peak_alloc - base_alloc)
+    delta_reserved = max(0, peak_reserved - base_reserved)
+    return delta_alloc, delta_reserved, peak_alloc, peak_reserved
 
 
 def _pretty_bytes(n: int) -> str:
@@ -365,6 +514,12 @@ def _make_fused_decode_variants(
     stages1: int,
     warps2: int,
     stages2: int,
+    split_k_v2: Optional[int] = None,
+    bn_v2: Optional[int] = None,
+    br_v2: Optional[int] = None,
+    warps1_v2: Optional[int] = None,
+    stages1_v2: Optional[int] = None,
+    pad_to_16_v2: bool = True,
     ablate_vk_resident: bool,
 ) -> list[tuple[str, Callable[[], object]]]:
     import torch
@@ -431,15 +586,28 @@ def _make_fused_decode_variants(
     params = inspect.signature(fn).parameters
     supports_vk = ("vk_resident" in params) and ("q_buffers" in params)
 
-    if supports_vk and ablate_vk_resident:
+    if supports_vk:
+        v2_split_k = int(split_k if split_k_v2 is None else split_k_v2)
+        v2_bn = int(bn if bn_v2 is None else bn_v2)
+        v2_br = int(br if br_v2 is None else br_v2)
+        v2_warps1 = int(warps1 if warps1_v2 is None else warps1_v2)
+        v2_stages1 = int(stages1 if stages1_v2 is None else stages1_v2)
         base_v2: dict[str, object] = dict(
             q_buffers=(Q0_ws, Q1_ws),
             precompute_q=True,
-            pad_to_16=True,
+            pad_to_16=bool(pad_to_16_v2),
             writethrough=True,
+            split_k=v2_split_k,
+            bn=v2_bn,
+            br=v2_br,
+            num_warps_stage1=v2_warps1,
+            num_stages_stage1=v2_stages1,
         )
-        _wrap(fn, name="lowrank_fused_v2(vk_resident=1)", extra={**base_v2, "vk_resident": True})
-        _wrap(fn, name="lowrank_fused_v2(vk_resident=0)", extra={**base_v2, "vk_resident": False})
+        if ablate_vk_resident:
+            _wrap(fn, name="lowrank_fused_v2(vk_resident=1)", extra={**base_v2, "vk_resident": True})
+            _wrap(fn, name="lowrank_fused_v2(vk_resident=0)", extra={**base_v2, "vk_resident": False})
+        else:
+            _wrap(fn, name="lowrank_fused_v2", extra={**base_v2, "vk_resident": True})
     else:
         _wrap(fn, name="lowrank_fused", extra={})
 
@@ -449,12 +617,27 @@ def _make_fused_decode_variants(
 def main() -> int:
     ap = argparse.ArgumentParser("Decode-stage KV-cache comparison (dense vs low-rank)")
     ap.add_argument("--B", type=int, default=8)
+    ap.add_argument("--Bs", type=str, default="", help="Optional comma-separated batch sizes to sweep (overrides --B).")
     ap.add_argument("--L", type=int, default=2048, help="KV cache length")
     ap.add_argument("--Ls", type=str, default="", help="Comma-separated KV lengths to sweep (overrides --L)")
+    ap.add_argument("--llama", type=str, default="", help="Use LLaMA preset config (e.g., llama2-7b, llama2-13b, llama2-70b, llama3-8b).")
+    ap.add_argument("--list-llama", action="store_true", help="List built-in --llama presets and exit.")
     ap.add_argument("--H", type=int, default=32)
     ap.add_argument("--Hk", type=int, default=8)
     ap.add_argument("--Dh", type=int, default=128)
-    ap.add_argument("--R", type=int, default=64)
+    ap.add_argument("--R", type=int, default=0, help="Per-head rank used by kernel. If <=0, infer from --target-param-ratio.")
+    ap.add_argument("--R-total", type=int, default=0, help="Optional total rank across all KV heads. Overrides --R when > 0.")
+    ap.add_argument("--hidden-size", type=int, default=0, help="Hidden size used for rank inference. Default: H*Dh or preset hidden_size.")
+    ap.add_argument("--target-param-ratio", type=float, default=0.5, help="Target low-rank parameter ratio (vs dense KV projections).")
+    ap.add_argument(
+        "--rank-formula",
+        choices=["headwise", "global"],
+        default="headwise",
+        help="headwise: infer per-head rank; global: infer total rank for full DxD factorization then map to per-head rank.",
+    )
+    ap.add_argument("--rank-round-multiple", type=int, default=64, help="Round inferred rank to a multiple of this value.")
+    ap.add_argument("--rank-rounding", choices=["down", "nearest", "up"], default="down", help="Rounding mode for inferred rank.")
+    ap.add_argument("--rank-cap", type=int, default=0, help="Optional cap for inferred rank (0 disables cap).")
     ap.add_argument("--dtype", choices=["fp16", "bf16"], default="bf16")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--warmup", type=int, default=50)
@@ -486,8 +669,33 @@ def main() -> int:
     ap.add_argument("--no-causal", dest="causal", action="store_false")
 
     ap.add_argument("--dense-backend", choices=["fa2", "triton", "torch", "auto"], default="auto")
+    ap.add_argument("--compare-kv-budget", action="store_true", help="Also run a KV-budget-equalized comparison by scaling batch for low-rank.")
+    ap.add_argument(
+        "--kv-budget-scale",
+        type=float,
+        default=0.0,
+        help="Manual low-rank batch scaling for KV-budget test. <=0 uses auto scale (dense_kv/lowrank_cache).",
+    )
+    ap.add_argument(
+        "--realistic-attn",
+        action="store_true",
+        help="Use a closer-to-real-attention setup: disable streaming baseline unless explicitly requested.",
+    )
+    ap.add_argument(
+        "--no-mem-reset",
+        action="store_true",
+        help="Disable CUDA memory reset before each variant benchmark/peak measurement.",
+    )
     ap.add_argument("--check", action="store_true", help="run a small reference check (recommend --L <= 256)")
     args = ap.parse_args()
+
+    if args.list_llama:
+        print(_format_llama_presets())
+        return 0
+
+    if args.realistic_attn and not args.no_stream:
+        args.no_stream = True
+    mem_reset_each_variant = not args.no_mem_reset
 
     import torch
 
@@ -495,25 +703,183 @@ def main() -> int:
         print("[error] CUDA is required.")
         return 2
 
+    llama_name = args.llama.strip().lower()
+    preset_used: Optional[LlamaPreset] = None
+    if llama_name:
+        preset_used = LLAMA_PRESETS.get(llama_name)
+        if preset_used is None:
+            print(f"[error] Unknown --llama preset: {args.llama}")
+            print(_format_llama_presets())
+            return 2
+        args.H = preset_used.num_heads
+        args.Hk = preset_used.num_kv_heads
+        args.Dh = preset_used.head_dim
+
     if args.H % args.Hk != 0:
         print(f"[error] GQA requires H divisible by Hk, got H={args.H}, Hk={args.Hk}")
+        return 2
+    if args.Dh <= 0:
+        print(f"[error] Invalid Dh={args.Dh}")
         return 2
 
     dtype = torch.float16 if args.dtype == "fp16" else torch.bfloat16
     torch.manual_seed(args.seed)
     dev = torch.device("cuda")
 
-    B, H, Hk, Dh, R = args.B, args.H, args.Hk, args.Dh, args.R
+    B_base, H, Hk, Dh = args.B, args.H, args.Hk, args.Dh
+    hidden_size = args.hidden_size if args.hidden_size > 0 else (preset_used.hidden_size if preset_used is not None else H * Dh)
+    kv_dim = Hk * Dh
+    rank_formula = str(args.rank_formula)
+
+    rank_total_target = 0
+    raw_rank = None
+    if args.R_total > 0:
+        rank_total_target = int(args.R_total)
+        R = max(1, _ceil_div(rank_total_target, Hk))
+        rank_policy = f"manual(--R-total={rank_total_target} -> per_head={R})"
+    elif args.R > 0:
+        R = int(args.R)
+        rank_total_target = R * Hk
+        rank_policy = f"manual(--R={R} per_head, total={rank_total_target})"
+    else:
+        try:
+            raw_rank = _rank_from_param_ratio(
+                hidden_size=hidden_size,
+                num_kv_heads=Hk,
+                head_dim=Dh,
+                target_ratio=float(args.target_param_ratio),
+                mode=rank_formula,
+            )
+        except ValueError as e:
+            print(f"[error] {e}")
+            return 2
+
+        if rank_formula == "global":
+            raw_rank_total = raw_rank
+            rank_total_target = _round_rank(
+                raw_rank_total,
+                multiple=max(1, int(args.rank_round_multiple)),
+                mode=args.rank_rounding,
+            )
+            if args.rank_cap > 0:
+                rank_total_target = min(rank_total_target, int(args.rank_cap))
+            rank_total_target = max(1, rank_total_target)
+            R = max(1, _ceil_div(rank_total_target, Hk))
+            rank_policy = (
+                f"auto(formula=global, target_ratio={float(args.target_param_ratio):.3f}, "
+                f"raw_total={raw_rank_total:.2f}, rounded_total={rank_total_target}, per_head={R})"
+            )
+        else:
+            R = _round_rank(raw_rank, multiple=max(1, int(args.rank_round_multiple)), mode=args.rank_rounding)
+            if args.rank_cap > 0:
+                R = min(R, int(args.rank_cap))
+            R = max(1, R)
+            rank_total_target = R * Hk
+            rank_policy = (
+                f"auto(formula=headwise, target_ratio={float(args.target_param_ratio):.3f}, "
+                f"raw={raw_rank:.2f}, round={args.rank_rounding}/{max(1, int(args.rank_round_multiple))}, per_head={R})"
+            )
+
+    rank_total_effective = R * Hk
+
     rep = H // Hk
-    BN = max(1, args.bn)
+    BN = max(1, args.bn)  # streaming baseline block size
+    achieved_ratio_headwise = _param_ratio_from_rank(
+        hidden_size=hidden_size,
+        num_kv_heads=Hk,
+        head_dim=Dh,
+        rank=R,
+        mode="headwise",
+    )
+    achieved_ratio_global = _param_ratio_from_rank(
+        hidden_size=hidden_size,
+        num_kv_heads=Hk,
+        head_dim=Dh,
+        rank=rank_total_effective,
+        mode="global",
+    )
+
+    # Base fused config (used by v1/v1.5 and as default for v2 unless overridden below)
+    fused_split_k_eff = int(args.split_k)
+    fused_bn_eff = max(1, int(args.bn))
+    fused_br_eff = max(1, int(args.br))
+    fused_warps1_eff = max(1, int(args.fused_warps1))
+    fused_stages1_eff = max(1, int(args.fused_stages1))
+
+    # v2-specific config: keep v1 fast, only apply conservative knobs to v2 path.
+    v2_split_k_eff = fused_split_k_eff
+    v2_bn_eff = fused_bn_eff
+    v2_br_eff = fused_br_eff
+    v2_warps1_eff = fused_warps1_eff
+    v2_stages1_eff = fused_stages1_eff
+    v2_pad_to_16 = True
+    auto_blocksize_changes: list[str] = []
+    v2_auto_changes: list[str] = []
+
+    # rep=1/2 under-utilizes GROUP_M=16 and can make v2 much slower.
+    if rep <= 2:
+        v2_pad_to_16 = False
+        v2_auto_changes.append("pad_to_16:True->False(rep<=2)")
+
+    # High-R can still stress v2 resources; apply safer v2-only defaults when user keeps defaults.
+    if R >= 512:
+        if args.bn == 128:
+            v2_bn_eff = 64
+            v2_auto_changes.append("v2_bn:128->64")
+        if args.br == 64:
+            v2_br_eff = 32
+            v2_auto_changes.append("v2_br:64->32")
+        if args.split_k == 512:
+            v2_split_k_eff = 256
+            v2_auto_changes.append("v2_split_k:512->256")
+        if args.fused_warps1 == 4:
+            v2_warps1_eff = 2
+            v2_auto_changes.append("v2_warps1:4->2")
+        if args.fused_stages1 == 2:
+            v2_stages1_eff = 1
+            v2_auto_changes.append("v2_stages1:2->1")
+
+    if fused_split_k_eff % fused_bn_eff != 0:
+        old = fused_split_k_eff
+        fused_split_k_eff = ((fused_split_k_eff + fused_bn_eff - 1) // fused_bn_eff) * fused_bn_eff
+        auto_blocksize_changes.append(f"split_k:{old}->{fused_split_k_eff}(aligned_to_bn)")
+    if v2_split_k_eff % v2_bn_eff != 0:
+        old = v2_split_k_eff
+        v2_split_k_eff = ((v2_split_k_eff + v2_bn_eff - 1) // v2_bn_eff) * v2_bn_eff
+        v2_auto_changes.append(f"v2_split_k:{old}->{v2_split_k_eff}(aligned_to_v2_bn)")
 
     if args.Ls.strip():
-        Ls = [int(x) for x in args.Ls.split(",") if x.strip()]
+        Ls = _parse_csv_ints(args.Ls)
     else:
         Ls = [int(args.L)]
     if not Ls:
         print("[error] Empty --Ls")
         return 2
+
+    if args.Bs.strip():
+        Bs = _parse_csv_ints(args.Bs)
+    else:
+        Bs = [int(B_base)]
+    Bs = [b for b in Bs if b > 0]
+    if not Bs:
+        print("[error] Empty/invalid --Bs")
+        return 2
+
+    kv_budget_scale = 0.0
+    if args.compare_kv_budget and len(Bs) == 1:
+        if args.kv_budget_scale > 0:
+            kv_budget_scale = float(args.kv_budget_scale)
+        else:
+            # Cache-only ratio for decode: lowrank/dense = R/Dh -> budget scale = Dh/R.
+            kv_budget_scale = max(1.0, float(Dh) / float(max(1, R)))
+        b0 = Bs[0]
+        b1 = max(b0 + 1, int(math.floor(b0 * kv_budget_scale + 1e-9)))
+        Bs = [b0, b1]
+    elif args.compare_kv_budget and len(Bs) >= 2:
+        kv_budget_scale = float(Bs[1]) / float(Bs[0])
+
+    if args.compare_kv_budget and args.no_dense:
+        print("[warn] --compare-kv-budget requested but dense baseline is disabled (--no-dense); budget summary will be skipped.")
 
     # Load fused decode module(s) once (optional)
     fused_mods: list[tuple[str, object]] = []
@@ -547,11 +913,9 @@ def main() -> int:
     else:
         dense_backend = dense_backend_req
 
-    for L in Ls:
-        if L <= 0:
-            print(f"[warn] Skipping non-positive L={L}")
-            continue
-
+    case_reports: dict[tuple[int, int], dict[str, object]] = {}
+    cases = [(b, l) for b in Bs for l in Ls if l > 0]
+    for B, L in cases:
         # ----------------------------
         # Generate low-rank KV cache + query factors
         # ----------------------------
@@ -673,13 +1037,19 @@ def main() -> int:
                         cos_half=cos_half,
                         sin_half=sin_half,
                         causal=args.causal,
-                        split_k=int(args.split_k),
-                        bn=int(BN),
-                        br=int(args.br),
-                        warps1=int(args.fused_warps1),
-                        stages1=int(args.fused_stages1),
+                        split_k=int(fused_split_k_eff),
+                        bn=int(fused_bn_eff),
+                        br=int(fused_br_eff),
+                        warps1=int(fused_warps1_eff),
+                        stages1=int(fused_stages1_eff),
                         warps2=int(args.fused_warps2),
                         stages2=int(args.fused_stages2),
+                        split_k_v2=int(v2_split_k_eff),
+                        bn_v2=int(v2_bn_eff),
+                        br_v2=int(v2_br_eff),
+                        warps1_v2=int(v2_warps1_eff),
+                        stages1_v2=int(v2_stages1_eff),
+                        pad_to_16_v2=bool(v2_pad_to_16),
                         ablate_vk_resident=(not args.no_fused_vk_ablation),
                     )
                 )
@@ -691,13 +1061,62 @@ def main() -> int:
         # ----------------------------
         bytes_per = 2  # fp16/bf16
         dense_kv_bytes = B * L * Hk * Dh * bytes_per * 2
-        lowrank_kv_bytes = B * L * Hk * R * bytes_per * 2 + Hk * R * Dh * bytes_per * 2
+        lowrank_cache_factor_bytes = B * L * Hk * R * bytes_per * 2
+        lowrank_basis_bytes = Hk * R * Dh * bytes_per * 2
+        lowrank_kv_bytes = lowrank_cache_factor_bytes + lowrank_basis_bytes
+        io_ratio_cache_only = dense_kv_bytes / max(1, lowrank_cache_factor_bytes)
+        io_ratio_conservative = dense_kv_bytes / max(1, lowrank_kv_bytes)
+        dense_kv_proj_params = 2 * hidden_size * kv_dim
+        lowrank_kv_proj_params_headwise = 2 * Hk * R * (hidden_size + Dh)
+        lowrank_kv_proj_params_global = 2 * rank_total_effective * (hidden_size + kv_dim)
+        kv_cache_ratio = lowrank_cache_factor_bytes / max(1, dense_kv_bytes)
 
         print("==== Decode KV-cache comparison (single-step, q_len=1) ====")
         print(f"Shape: B={B}, L={L}, H={H}, Hk={Hk} (rep={rep}), Dh={Dh}, R={R}, dtype={args.dtype}, causal={args.causal}")
-        fused_cfg_str = "disabled" if not fused_variants else f"{len(fused_variants)} variants (split_k={int(args.split_k)} bn={BN} br={int(args.br)} warps1={int(args.fused_warps1)})"
-        print(f"Config: dense_backend={dense_backend} | lowrank_stream_bn={BN} | fused={fused_cfg_str}")
-        print(f"Theoretical KV cache size: dense≈{_pretty_bytes(dense_kv_bytes)} | lowrank≈{_pretty_bytes(lowrank_kv_bytes)}")
+        if preset_used is not None:
+            print(f"Preset: llama={llama_name} (hidden_size={preset_used.hidden_size}, H={preset_used.num_heads}, Hk={preset_used.num_kv_heads}, Dh={preset_used.head_dim})")
+        print(
+            f"Rank mapping: per_head={R}, total_effective={rank_total_effective}"
+            + (f", total_target={rank_total_target}" if rank_total_target > 0 else "")
+        )
+        print(
+            f"Rank policy: {rank_policy} | hidden_size={hidden_size}, kv_dim={kv_dim}, "
+            f"achieved_ratio_headwise={achieved_ratio_headwise:.4f}, achieved_ratio_global={achieved_ratio_global:.4f}"
+        )
+        print(
+            f"KV proj params/layer: dense={dense_kv_proj_params:,} | "
+            f"lowrank_headwise={lowrank_kv_proj_params_headwise:,} | "
+            f"lowrank_global_ref={lowrank_kv_proj_params_global:,}"
+        )
+        print(f"Expected cache ratio (lowrank/dense, cache-only): R/Dh={R}/{Dh}={kv_cache_ratio:.4f}x")
+        fused_cfg_str = (
+            "disabled"
+            if not fused_variants
+            else (
+                f"{len(fused_variants)} variants "
+                f"(base: split_k={int(fused_split_k_eff)} bn={int(fused_bn_eff)} br={int(fused_br_eff)} warps1={int(fused_warps1_eff)} stages1={int(fused_stages1_eff)}; "
+                f"v2: split_k={int(v2_split_k_eff)} bn={int(v2_bn_eff)} br={int(v2_br_eff)} warps1={int(v2_warps1_eff)} stages1={int(v2_stages1_eff)} pad_to_16={int(v2_pad_to_16)})"
+            )
+        )
+        print(
+            f"Config: dense_backend={dense_backend} | lowrank_stream_bn={BN} | fused={fused_cfg_str} "
+            f"| mem_reset_each_variant={int(mem_reset_each_variant)}"
+        )
+        if auto_blocksize_changes:
+            print(f"[auto-blocksize] {'; '.join(auto_blocksize_changes)}")
+        if v2_auto_changes:
+            print(f"[auto-v2] {'; '.join(v2_auto_changes)}")
+        print(f"Theoretical KV read/step: dense≈{_pretty_bytes(dense_kv_bytes)}")
+        print(
+            f"Theoretical KV read/step (lowrank, cache-only)=≈{_pretty_bytes(lowrank_cache_factor_bytes)} "
+            f"| IO upper-bound x{io_ratio_cache_only:.2f}"
+        )
+        print(
+            f"Theoretical KV read/step (lowrank, cache+basis)=≈{_pretty_bytes(lowrank_kv_bytes)} "
+            f"(basis≈{_pretty_bytes(lowrank_basis_bytes)}) | IO upper-bound x{io_ratio_conservative:.2f}"
+        )
+        if R >= Dh:
+            print(f"[note] R ({R}) >= Dh ({Dh}): low-rank KV cache can be larger than dense KV cache at decode-time.")
         if Hk != H and dense_backend in ("torch", "triton"):
             print("[note] dense_backend=torch/triton expands K/V from Hk to H via repeat_interleave (not true GQA). Prefer --dense-backend fa2.")
 
@@ -707,14 +1126,32 @@ def main() -> int:
         ]
         variants.extend(fused_variants)
 
-        results: list[tuple[str, float, float, int, int]] = []
+        results: list[tuple[str, float, float, int, int, int, int]] = []
         failures: list[tuple[str, Exception]] = []
+        dense_cache_released = False
         for name, fn in variants:
             try:
+                if (
+                    (not args.check)
+                    and (not dense_cache_released)
+                    and (not args.no_dense)
+                    and (not name.startswith("dense_kvcache("))
+                ):
+                    # Release dense-only resident cache before low-rank variants so memory peak
+                    # reflects each path more independently in this shared script.
+                    K_rope_blhd = None
+                    V_blhd = None
+                    K_bhld = None
+                    V_bhld = None
+                    dense_cache_released = True
+                    _reset_cuda_memory_state()
+
+                if mem_reset_each_variant:
+                    _reset_cuda_memory_state()
                 ms = _bench_ms(fn, warmup=args.warmup, iters=args.iters)
                 tok_s = B / (ms / 1e3)
-                alloc, res = _isolated_peak_bytes(fn)
-                results.append((name, ms, tok_s, alloc, res))
+                delta_alloc, delta_res, peak_alloc, peak_res = _isolated_peak_bytes(fn)
+                results.append((name, ms, tok_s, delta_alloc, delta_res, peak_alloc, peak_res))
             except Exception as e:
                 failures.append((name, e))
 
@@ -725,11 +1162,44 @@ def main() -> int:
             continue
 
         best_ms = min(r[1] for r in results)
-        for name, ms, tok_s, alloc, res in results:
+        for name, ms, tok_s, delta_alloc, delta_res, peak_alloc, peak_res in results:
             rel = ms / best_ms
-            print(f"- {name}: {ms:.4f} ms | {tok_s:,.0f} tok/s | x{rel:.2f} vs best | peak_alloc={_pretty_bytes(alloc)} peak_res={_pretty_bytes(res)}")
+            print(
+                f"- {name}: {ms:.4f} ms | {tok_s:,.0f} tok/s | x{rel:.2f} vs best | "
+                f"peak_delta_alloc={_pretty_bytes(delta_alloc)} peak_delta_res={_pretty_bytes(delta_res)} | "
+                f"peak_alloc={_pretty_bytes(peak_alloc)} peak_res={_pretty_bytes(peak_res)}"
+            )
         for name, e in failures:
             print(f"- {name}: FAILED ({type(e).__name__}: {e})")
+
+        dense_ref = next((r for r in results if r[0].startswith("dense_kvcache(")), None)
+        if dense_ref is not None:
+            dense_ms = dense_ref[1]
+            print(f"[speedup_vs_dense] baseline={dense_ref[0]} ({dense_ms:.4f} ms)")
+            for name, ms, tok_s, _, _, _, _ in results:
+                if name.startswith("dense_kvcache("):
+                    continue
+                sp = dense_ms / ms
+                print(f"  - {name}: x{sp:.2f} speedup | {tok_s:,.0f} tok/s")
+
+        stream_ref = next((r for r in results if r[0] == "lowrank_kvcache(streaming_torch_rope)"), None)
+        if stream_ref is not None:
+            stream_ms = stream_ref[1]
+            print(f"[speedup_vs_lowrank_stream] baseline={stream_ref[0]} ({stream_ms:.4f} ms)")
+            for name, ms, tok_s, _, _, _, _ in results:
+                if name == stream_ref[0]:
+                    continue
+                sp = stream_ms / ms
+                print(f"  - {name}: x{sp:.2f} speedup | {tok_s:,.0f} tok/s")
+
+        case_reports[(B, L)] = {
+            "results": list(results),
+            "failures": list(failures),
+            "dense_kv_bytes": int(dense_kv_bytes),
+            "lowrank_cache_factor_bytes": int(lowrank_cache_factor_bytes),
+            "best_lowrank": _best_lowrank_result(results),
+            "dense_ref": dense_ref,
+        }
 
         if args.check:
             if L > 256:
@@ -756,6 +1226,50 @@ def main() -> int:
                         max_abs2 = diff2.abs().max().item()
                         finite2 = torch.isfinite(out_fused).all().item()
                         print(f"[check] {fused_name} vs torch_ref: finite={finite2} max_abs={max_abs2:.3e} rel_fro={rel2:.3e}")
+
+    if args.compare_kv_budget:
+        print("==== KV-Budget Throughput Summary ====")
+        if len(Bs) < 2:
+            print("[warn] Need at least two batch sizes to compare KV-budget mode.")
+        else:
+            b_dense = Bs[0]
+            b_lowrank = Bs[1]
+            scale = float(b_lowrank) / float(max(1, b_dense))
+            scale_note = f" (auto_scale={kv_budget_scale:.2f})" if kv_budget_scale > 0 else ""
+            print(f"Compare batches: dense/ref B={b_dense}, lowrank/budget B={b_lowrank}, scale={scale:.2f}{scale_note}")
+            if args.realistic_attn:
+                print("[note] realistic-attn enabled: streaming baseline disabled for closer kernel-path comparison.")
+
+            for L in Ls:
+                base = case_reports.get((b_dense, L))
+                budget = case_reports.get((b_lowrank, L))
+                if base is None or budget is None:
+                    print(f"- L={L}: missing case(s), skipped.")
+                    continue
+
+                dense_ref = base.get("dense_ref")
+                low_base = base.get("best_lowrank")
+                low_budget = budget.get("best_lowrank")
+                if dense_ref is None or low_base is None or low_budget is None:
+                    print(f"- L={L}: missing dense or lowrank result, skipped.")
+                    continue
+
+                dense_name, _, dense_tok_s, _, _, _, _ = dense_ref
+                low_base_name, _, low_base_tok_s, _, _, _, _ = low_base
+                low_budget_name, _, low_budget_tok_s, _, _, _, _ = low_budget
+                same_input_gain = low_base_tok_s / max(1e-12, dense_tok_s)
+                kv_budget_gain = low_budget_tok_s / max(1e-12, dense_tok_s)
+
+                dense_kv = int(base.get("dense_kv_bytes", 0))
+                lowrank_kv = int(budget.get("lowrank_cache_factor_bytes", 0))
+                budget_ratio = (lowrank_kv / dense_kv) if dense_kv > 0 else float("nan")
+                print(
+                    f"- L={L}: same_input_gain={same_input_gain:.3f}x "
+                    f"({low_base_name} @B={b_dense} vs {dense_name} @B={b_dense}); "
+                    f"kv_budget_gain={kv_budget_gain:.3f}x "
+                    f"({low_budget_name} @B={b_lowrank} vs {dense_name} @B={b_dense}); "
+                    f"budget_match(lowrank/dense)={budget_ratio:.3f}x"
+                )
 
     return 0
 

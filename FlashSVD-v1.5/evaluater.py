@@ -210,9 +210,11 @@ def decode_kvcache_eval(
     warmup: int = 5,
     max_cache_len: Optional[int] = None,
     lowrank_cache: bool = False,
+    flashsvd_dense_cache: bool = False,
+    baseline_dense_kvcache: bool = False,
     profile_decode: bool = False,
     profile_decode_steps: int = 20,
-) -> None:
+) -> dict[str, float | int | bool]:
     """Decode benchmark using KV-cache (per-token incremental forward).
 
     Runs:
@@ -277,6 +279,13 @@ def decode_kvcache_eval(
     if postpone_attn_prof:
         os.environ.pop("FLASH_SVD_PROFILE_ATTN_DECODE", None)
 
+    if lowrank_cache and flashsvd_dense_cache:
+        raise ValueError("lowrank_cache and flashsvd_dense_cache are mutually exclusive.")
+    if lowrank_cache and baseline_dense_kvcache:
+        raise ValueError("lowrank_cache and baseline_dense_kvcache are mutually exclusive.")
+    if flashsvd_dense_cache and baseline_dense_kvcache:
+        raise ValueError("flashsvd_dense_cache and baseline_dense_kvcache are mutually exclusive.")
+
     if lowrank_cache:
         from flashsvd_component.lowrank_cache import LowRankKVCache
 
@@ -284,6 +293,16 @@ def decode_kvcache_eval(
         # vary ranks by layer. Avoid inferring a single global rank here; the
         # cache lazily allocates per-layer buffers on the first `update()`.
         cache = LowRankKVCache(
+            model.config,
+            max_batch_size=int(batch_size),
+            max_cache_len=int(max_cache_len),
+            device=dev,
+            dtype=dtype,
+        )
+    elif flashsvd_dense_cache or baseline_dense_kvcache:
+        from flashsvd_component.dense_cache import FlashSVDDenseKVCache
+
+        cache = FlashSVDDenseKVCache(
             model.config,
             max_batch_size=int(batch_size),
             max_cache_len=int(max_cache_len),
@@ -331,22 +350,39 @@ def decode_kvcache_eval(
                     baseline_env = os.environ.get("FLASH_SVD_BASELINE_LR_KVCACHE", "0") != "0"
                     force_kernel_env = os.environ.get("FLASH_SVD_FORCE_ATTENTION_KERNEL", "0") != "0"
                     auto_mha_sdpa_env = os.environ.get("FLASH_SVD_AUTO_MHA_SDPA", "0") != "0"
+                    auto_mha_stream_env = os.environ.get("FLASH_SVD_AUTO_MHA_STREAM", "0") != "0"
                     mha_stream_env = os.environ.get("FLASH_SVD_DECODE_MHA_STREAM", "0") != "0"
                     if baseline_env:
                         tag = "LowRankKVCacheBaseline"
                     else:
                         try:
-                            thr = int(os.environ.get("FLASH_SVD_MHA_SDPA_R_THRESHOLD", "512"))
+                            thr_sdpa = int(os.environ.get("FLASH_SVD_MHA_SDPA_R_THRESHOLD", "512"))
                         except Exception:
-                            thr = 512
-                        if auto_mha_sdpa_env and (not force_kernel_env) and rep == 1 and R >= thr:
-                            tag = "LowRankKVCacheAutoSDPA"
-                        elif mha_stream_env and rep == 1 and H == Hk:
+                            thr_sdpa = 512
+                        try:
+                            thr_stream = int(os.environ.get("FLASH_SVD_MHA_STREAM_R_THRESHOLD", "768"))
+                        except Exception:
+                            thr_stream = 768
+                        use_mha_stream = bool(
+                            rep == 1
+                            and H == Hk
+                            and (
+                                mha_stream_env
+                                or (auto_mha_stream_env and R >= thr_stream)
+                            )
+                        )
+                        if use_mha_stream:
                             tag = "LowRankKVCacheMHAStream"
+                        elif auto_mha_sdpa_env and (not force_kernel_env) and rep == 1 and R >= thr_sdpa:
+                            tag = "LowRankKVCacheAutoSDPA"
                         elif force_kernel_env:
                             tag = "LowRankKVCacheForcedKernel"
                         else:
                             tag = "LowRankKVCache"
+                elif flashsvd_dense_cache:
+                    tag = "FlashSVDDenseKVCache"
+                elif baseline_dense_kvcache:
+                    tag = "DenseKVCacheBaseline"
                 else:
                     tag = "StaticCache"
                 extra = " (REP=1, non-GQA)" if rep == 1 else ""
@@ -402,8 +438,22 @@ def decode_kvcache_eval(
     print(f"Prefill: prompt_len={prompt_len} | time {t_prefill:.3f}s | {prefill_tok_s:,.0f} tok/s")
     print(f"Decode : new_tokens={new_tokens} | time {t_decode:.3f}s | {decode_ms:.3f} ms/token | {decode_tok_s:,.0f} tok/s")
 
+    result = {
+        "prompt_len": int(prompt_len),
+        "new_tokens": int(new_tokens),
+        "batch_size": int(batch_size),
+        "prefill_time_s": float(t_prefill),
+        "decode_time_s": float(t_decode),
+        "prefill_tok_s": float(prefill_tok_s),
+        "decode_tok_s": float(decode_tok_s),
+        "decode_ms_per_token": float(decode_ms),
+        "lowrank_cache": bool(lowrank_cache),
+        "flashsvd_dense_cache": bool(flashsvd_dense_cache),
+        "baseline_dense_kvcache": bool(baseline_dense_kvcache),
+    }
+
     if not profile_decode:
-        return
+        return result
 
     steps = int(max(0, profile_decode_steps))
     if steps <= 0:
@@ -548,3 +598,4 @@ def decode_kvcache_eval(
                 h.remove()
             except Exception:
                 pass
+    return result

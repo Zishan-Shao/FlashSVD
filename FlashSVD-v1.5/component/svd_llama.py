@@ -7,6 +7,7 @@ import torch
 
 from flashsvd_component.svd_llama import SVD_LlamaAttention as _FlashSVD_LlamaAttention
 from flashsvd_component.svd_llama import SVD_LlamaMLP as _FlashSVD_LlamaMLP
+from flashsvd_component.svd_llama import enable_flashsvd_llama_layer_tail_cuda_graph
 
 # ---------------------------------------------------------------------------
 # Compatibility shims for older pickled checkpoints

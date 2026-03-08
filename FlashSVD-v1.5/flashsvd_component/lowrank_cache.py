@@ -49,9 +49,14 @@ class LowRankKVCache(Cache):
         dtype: torch.dtype = torch.float16,
         layer_device_map: Optional[dict[int, torch.device | str | int]] = None,
     ) -> None:
-        super().__init__()
-        self.max_batch_size = int(max_batch_size)
-        self.max_cache_len = int(max_cache_len)
+        # transformers>=4.57 Cache.__init__ requires either `layers` or
+        # `layer_class_to_replicate`; older versions accepted no args.
+        try:
+            super().__init__(layers=[])
+        except TypeError:
+            super().__init__()
+        self._max_batch_size = int(max_batch_size)
+        self._max_cache_len = int(max_cache_len)
         self._dtype = dtype
 
         # NOTE: some checkpoints use different ranks for K/V (and even vary per-layer).
@@ -85,8 +90,8 @@ class LowRankKVCache(Cache):
             # Initialize with 0-rank tensors unless explicit ranks were provided.
             k_rank0 = int(self._init_rank_k)
             v_rank0 = int(self._init_rank_v)
-            self.key_cache.append(torch.zeros((self.max_batch_size, self.max_cache_len, k_rank0), dtype=self._dtype, device=layer_device))
-            self.value_cache.append(torch.zeros((self.max_batch_size, self.max_cache_len, v_rank0), dtype=self._dtype, device=layer_device))
+            self.key_cache.append(torch.zeros((self._max_batch_size, self._max_cache_len, k_rank0), dtype=self._dtype, device=layer_device))
+            self.value_cache.append(torch.zeros((self._max_batch_size, self._max_cache_len, v_rank0), dtype=self._dtype, device=layer_device))
             self._layer_key_rank.append(k_rank0)
             self._layer_value_rank.append(v_rank0)
             self._layer_initialized.append(False)
@@ -96,6 +101,14 @@ class LowRankKVCache(Cache):
         self._rope_tables: dict[tuple[int, int, float, torch.dtype, torch.device], tuple[torch.Tensor, torch.Tensor]] = {}
 
         self._rope_theta = float(getattr(config, "rope_theta", 10000.0))
+
+    @property
+    def max_batch_size(self) -> int:
+        return int(self._max_batch_size)
+
+    @property
+    def max_cache_len(self) -> int:
+        return int(self._max_cache_len)
 
     def update(
         self,
@@ -122,8 +135,8 @@ class LowRankKVCache(Cache):
                     f"but got key_states.shape={tuple(key_states.shape)} value_states.shape={tuple(value_states.shape)}."
                 )
             layer_device = self._layer_device[layer_idx]
-            self.key_cache[layer_idx] = torch.zeros((self.max_batch_size, self.max_cache_len, k_rank), dtype=self._dtype, device=layer_device)
-            self.value_cache[layer_idx] = torch.zeros((self.max_batch_size, self.max_cache_len, v_rank), dtype=self._dtype, device=layer_device)
+            self.key_cache[layer_idx] = torch.zeros((self._max_batch_size, self._max_cache_len, k_rank), dtype=self._dtype, device=layer_device)
+            self.value_cache[layer_idx] = torch.zeros((self._max_batch_size, self._max_cache_len, v_rank), dtype=self._dtype, device=layer_device)
             self._layer_key_rank[layer_idx] = int(k_rank)
             self._layer_value_rank[layer_idx] = int(v_rank)
             # Update the legacy hint rank.

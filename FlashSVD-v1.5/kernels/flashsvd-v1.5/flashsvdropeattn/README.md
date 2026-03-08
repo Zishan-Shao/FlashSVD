@@ -53,3 +53,70 @@ python kernels/flashsvd-v1.5/flashsvdropeattn/decode_compare.py \
   --B 8 --L 8192 --H 32 --Hk 8 --Dh 128 --R 64 --dtype bf16 \
   --dense-backend fa2 --no-stream --fused-tune --br 64
 ```
+
+### LLaMA/global-rank recipes (recommended)
+
+Same-input attention comparison (closer to real decode path):
+
+```bash
+python kernels/flashsvd-v1.5/flashsvdropeattn/decode_compare.py \
+  --llama llama2-7b \
+  --target-param-ratio 0.5 \
+  --rank-formula global \
+  --rank-round-multiple 64 \
+  --B 4 --L 2048 --dtype bf16 \
+  --no-fused-vk-ablation \
+  --realistic-attn
+```
+
+Same-input + equal KV-budget throughput comparison (auto scales low-rank batch by `Dh/R`):
+
+```bash
+python kernels/flashsvd-v1.5/flashsvdropeattn/decode_compare.py \
+  --llama llama2-7b \
+  --target-param-ratio 0.5 \
+  --rank-formula global \
+  --rank-round-multiple 64 \
+  --B 4 --L 2048 --dtype bf16 \
+  --no-fused-vk-ablation \
+  --compare-kv-budget \
+  --realistic-attn
+```
+
+Batch sweep (manual), useful for scheduler design:
+
+```bash
+python kernels/flashsvd-v1.5/flashsvdropeattn/decode_compare.py \
+  --llama llama2-7b \
+  --target-param-ratio 0.5 \
+  --rank-formula global \
+  --rank-round-multiple 64 \
+  --Bs 1,2,4,8,16,32,64,128 --L 2048 --dtype bf16 \
+  --no-fused-vk-ablation \
+  --realistic-attn
+```
+
+### Tricks log (decode_compare)
+
+- Rank semantics:
+  - `--rank-formula global` means infer total rank for full `D x D` factorization, then map to per-head kernel rank.
+  - `--R-total` can be passed directly when you already know total rank.
+- Realistic attention path:
+  - Use `--realistic-attn` to disable the Python streaming baseline and focus on dense FA vs fused low-rank kernels.
+- V2 safety:
+  - V2 has auto safety knobs for high-rank and small `rep` (e.g. `pad_to_16=False` when `rep<=2`).
+  - If v2 is slower, prefer `lowrank_fused`/`lowrank_fused_v1` as serving candidates.
+- Serving kernel dispatch (SVD LLaMA):
+  - `flashsvd_component/svd_llama.py` now supports decode variant dispatch across `v1.5`, `v1.6_v1`, and `v1.6_v2`.
+  - Default is `FLASH_SVD_DECODE_KERNEL_VARIANT=auto` with a stable heuristic (online variant autotune is opt-in).
+  - Override manually with `FLASH_SVD_DECODE_KERNEL_VARIANT={v15|v16_v1|v16_v2}`.
+  - Optional batch map: `FLASH_SVD_DECODE_KERNEL_MAP="1:v16_v1,2:v16_v1,8:v15,16:v16_v1,32:v15,64:v15,128:v16_v1"`.
+  - Enable online variant autotune only when needed: `FLASH_SVD_DECODE_KERNEL_AUTOTUNE=1`.
+- Memory measurement:
+  - Per-variant CUDA memory reset is enabled by default.
+  - Output now includes both `peak_delta_*` (incremental) and absolute `peak_*`.
+  - Use `--no-mem-reset` only if you intentionally want allocator-cached behavior.
+- Recompile control:
+  - Keep `split_k/bn/br/warps/stages/dtype` fixed across runs.
+  - Keep cache shape fixed when benchmarking: in `SVDLLM_flashsvd.py --step 6`, you can pin `--max_cache_len`.
+  - For serving stability, prefer `FLASH_SVD_DECODE_KERNEL_AUTOTUNE=0` and fixed `FLASH_SVD_DECODE_KERNEL_VARIANT`.

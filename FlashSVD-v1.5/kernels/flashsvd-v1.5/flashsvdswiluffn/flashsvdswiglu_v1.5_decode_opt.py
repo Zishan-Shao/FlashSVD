@@ -8,7 +8,7 @@ import torch.nn.functional as F
 
 DECODE_MAX_BATCH = 4
 DECODE_MAX_SEQ = 4
-DECODE_MAX_R2 = 2048
+DECODE_MAX_R2 = 512
 
 # ==============================================================
 # Triton kernels (SwiGLU in rank space, P -> S in one shot)
@@ -98,12 +98,126 @@ def _fused_ffn_phase1_swiglu_base(
     )
 
 
+@triton.jit
+def _fused_ffn_phase1_swiglu_decode_token_base(
+    P_ptr, V1_ptr, U2_ptr, S_ptr, b1_ptr,
+    T, D, R1, R2,
+    sP_t, sP_r1,
+    sV1_r1, sV1_d,
+    sU2_d, sU2_r2,
+    sb1,
+    sS_t, sS_r2,
+    BD: tl.constexpr, BR1: tl.constexpr, BR2: tl.constexpr,
+    NUM_R2_TILES: tl.constexpr,
+    USE_BF16: tl.constexpr,
+    USE_FP32: tl.constexpr,
+):
+    pid_t = tl.program_id(0)
+
+    if pid_t >= T:
+        return
+
+    in_dtype = tl.float32 if USE_FP32 else (tl.bfloat16 if USE_BF16 else tl.float16)
+
+    offs_r2 = tl.arange(0, BR2)
+    offs_r2_0 = offs_r2
+    offs_r2_1 = BR2 + offs_r2
+    offs_r2_2 = 2 * BR2 + offs_r2
+    offs_r2_3 = 3 * BR2 + offs_r2
+
+    # Decode-specialized schedule: keep one token's rank-space S resident in the program
+    # so P@V1 + SwiGLU is evaluated once per d-tile, then accumulated into all R2 tiles.
+    acc0 = tl.zeros((BR2,), dtype=tl.float32)
+    acc1 = tl.zeros((BR2,), dtype=tl.float32)
+    acc2 = tl.zeros((BR2,), dtype=tl.float32)
+    acc3 = tl.zeros((BR2,), dtype=tl.float32)
+
+    for d0 in range(0, D, BD):
+        d = d0 + tl.arange(0, BD)
+        m_d = d < D
+
+        lhs_acc = tl.zeros((BD,), dtype=tl.float32)
+        rhs_acc = tl.zeros((BD,), dtype=tl.float32)
+
+        for r1_0 in range(0, R1, BR1):
+            r1 = r1_0 + tl.arange(0, BR1)
+            m_r1 = r1 < R1
+
+            P_tok = tl.load(
+                P_ptr + pid_t * sP_t + r1 * sP_r1,
+                mask=m_r1,
+                other=0.0,
+            ).to(in_dtype)
+
+            V1_lhs = tl.load(
+                V1_ptr + r1[:, None] * sV1_r1 + d[None, :] * sV1_d,
+                mask=m_r1[:, None] & m_d[None, :],
+                other=0.0,
+            ).to(in_dtype)
+
+            V1_rhs = tl.load(
+                V1_ptr + r1[:, None] * sV1_r1 + (d[None, :] + D) * sV1_d,
+                mask=m_r1[:, None] & m_d[None, :],
+                other=0.0,
+            ).to(in_dtype)
+
+            P_tok_f = P_tok.to(tl.float32)
+            lhs_acc += tl.sum(P_tok_f[:, None] * V1_lhs.to(tl.float32), axis=0)
+            rhs_acc += tl.sum(P_tok_f[:, None] * V1_rhs.to(tl.float32), axis=0)
+
+        b1_lhs = tl.load(b1_ptr + d * sb1, mask=m_d, other=0.0).to(tl.float32)
+        b1_rhs = tl.load(b1_ptr + (d + D) * sb1, mask=m_d, other=0.0).to(tl.float32)
+        lhs = lhs_acc + b1_lhs
+        rhs = rhs_acc + b1_rhs
+
+        H = ((lhs * tl.sigmoid(lhs)) * rhs).to(tl.float32)
+
+        U2_0 = tl.load(
+            U2_ptr + d[:, None] * sU2_d + offs_r2_0[None, :] * sU2_r2,
+            mask=m_d[:, None] & (offs_r2_0[None, :] < R2),
+            other=0.0,
+        ).to(in_dtype)
+        acc0 += tl.sum(H[:, None] * U2_0.to(tl.float32), axis=0)
+
+        if NUM_R2_TILES > 1:
+            U2_1 = tl.load(
+                U2_ptr + d[:, None] * sU2_d + offs_r2_1[None, :] * sU2_r2,
+                mask=m_d[:, None] & (offs_r2_1[None, :] < R2),
+                other=0.0,
+            ).to(in_dtype)
+            acc1 += tl.sum(H[:, None] * U2_1.to(tl.float32), axis=0)
+
+        if NUM_R2_TILES > 2:
+            U2_2 = tl.load(
+                U2_ptr + d[:, None] * sU2_d + offs_r2_2[None, :] * sU2_r2,
+                mask=m_d[:, None] & (offs_r2_2[None, :] < R2),
+                other=0.0,
+            ).to(in_dtype)
+            acc2 += tl.sum(H[:, None] * U2_2.to(tl.float32), axis=0)
+
+        if NUM_R2_TILES > 3:
+            U2_3 = tl.load(
+                U2_ptr + d[:, None] * sU2_d + offs_r2_3[None, :] * sU2_r2,
+                mask=m_d[:, None] & (offs_r2_3[None, :] < R2),
+                other=0.0,
+            ).to(in_dtype)
+            acc3 += tl.sum(H[:, None] * U2_3.to(tl.float32), axis=0)
+
+    base = S_ptr + pid_t * sS_t
+    tl.store(base + offs_r2_0 * sS_r2, acc0, mask=offs_r2_0 < R2)
+    if NUM_R2_TILES > 1:
+        tl.store(base + offs_r2_1 * sS_r2, acc1, mask=offs_r2_1 < R2)
+    if NUM_R2_TILES > 2:
+        tl.store(base + offs_r2_2 * sS_r2, acc2, mask=offs_r2_2 < R2)
+    if NUM_R2_TILES > 3:
+        tl.store(base + offs_r2_3 * sS_r2, acc3, mask=offs_r2_3 < R2)
+
+
 # ── Autotuning wrapper (configs control BL/BD/BR1/BR2 & warps/stages) ─────────
 TUNE_FFN_SWIGLU = [
     triton.Config({'BL': 32,  'BD': 64,  'BR1': 64,  'BR2': 64},  num_warps=4, num_stages=2),
     triton.Config({'BL': 64,  'BD': 64,  'BR1': 64,  'BR2': 64},  num_warps=4, num_stages=2),
     triton.Config({'BL': 64,  'BD': 128, 'BR1': 64,  'BR2': 64},  num_warps=4, num_stages=2),
-    triton.Config({'BL': 16,  'BD': 128, 'BR1': 64,  'BR2': 256}, num_warps=8, num_stages=2),
     triton.Config({'BL': 32,  'BD': 128, 'BR1': 64,  'BR2': 128}, num_warps=4, num_stages=2),
     triton.Config({'BL': 32,  'BD': 128, 'BR1': 64,  'BR2': 128}, num_warps=8, num_stages=2),
     triton.Config({'BL': 64,  'BD': 128, 'BR1': 64,  'BR2': 128}, num_warps=8, num_stages=2),
@@ -119,12 +233,19 @@ TUNE_FFN_SWIGLU = [
     # Larger BR1 reduces the number of r1 loop iterations when R1 is large.
     triton.Config({'BL': 64,  'BD': 128, 'BR1': 128, 'BR2': 128}, num_warps=8, num_stages=2),
     triton.Config({'BL': 32,  'BD': 128, 'BR1': 128, 'BR2': 128}, num_warps=8, num_stages=2),
-    triton.Config({'BL': 16,  'BD': 128, 'BR1': 128, 'BR2': 256}, num_warps=8, num_stages=2),
     triton.Config({'BL': 32,  'BD': 128, 'BR1': 128, 'BR2': 256}, num_warps=8, num_stages=2),
     triton.Config({'BL': 32,  'BD': 128, 'BR1': 128, 'BR2': 512}, num_warps=8, num_stages=3),
     triton.Config({'BL': 32,  'BD': 128, 'BR1': 128, 'BR2': 512}, num_warps=4, num_stages=2),
     # Larger tiles can OOR on some GPUs; add cautiously:
     # triton.Config({'BL': 128, 'BD': 256, 'BR1': 128, 'BR2': 128}, num_warps=8, num_stages=2),
+]
+
+TUNE_FFN_SWIGLU_DECODE = [
+    triton.Config({'BD': 64,  'BR1': 64,  'BR2': 256, 'NUM_R2_TILES': 2}, num_warps=4, num_stages=2),
+    triton.Config({'BD': 128, 'BR1': 64,  'BR2': 256, 'NUM_R2_TILES': 2}, num_warps=4, num_stages=2),
+    triton.Config({'BD': 128, 'BR1': 128, 'BR2': 256, 'NUM_R2_TILES': 2}, num_warps=8, num_stages=2),
+    triton.Config({'BD': 128, 'BR1': 128, 'BR2': 128, 'NUM_R2_TILES': 4}, num_warps=8, num_stages=2),
+    triton.Config({'BD': 64,  'BR1': 128, 'BR2': 128, 'NUM_R2_TILES': 4}, num_warps=4, num_stages=2),
 ]
 
 # Decode is typically L=1; include L in the key so autotune can pick a different schedule vs prefill.
@@ -156,19 +277,45 @@ def fused_ffn_phase1_swiglu_auto(
     )
 
 
-# ==============================================================
-# Public wrapper
-# ==============================================================
+@triton.autotune(configs=TUNE_FFN_SWIGLU_DECODE, key=['D', 'R1', 'R2', 'T'])
+@triton.jit
+def fused_ffn_phase1_swiglu_decode_token_auto(
+    P_ptr, V1_ptr, U2_ptr, S_ptr, b1_ptr,
+    T, D, R1, R2,
+    sP_t, sP_r1,
+    sV1_r1, sV1_d,
+    sU2_d, sU2_r2,
+    sb1,
+    sS_t, sS_r2,
+    BD: tl.constexpr, BR1: tl.constexpr, BR2: tl.constexpr,
+    NUM_R2_TILES: tl.constexpr,
+    USE_BF16: tl.constexpr,
+    USE_FP32: tl.constexpr,
+):
+    _fused_ffn_phase1_swiglu_decode_token_base(
+        P_ptr, V1_ptr, U2_ptr, S_ptr, b1_ptr,
+        T, D, R1, R2,
+        sP_t, sP_r1,
+        sV1_r1, sV1_d,
+        sU2_d, sU2_r2,
+        sb1,
+        sS_t, sS_r2,
+        BD=BD, BR1=BR1, BR2=BR2,
+        NUM_R2_TILES=NUM_R2_TILES,
+        USE_BF16=USE_BF16,
+        USE_FP32=USE_FP32,
+    )
 
-def _pick_decode_config(R1: int, R2: int) -> dict[str, int]:
-    # For Llama-2-7B-like half-rank decode (R ~= 1.5k), true single-tile R2 residency is not
-    # practical on current GPUs. This schedule instead reduces the R2 grid and raises BR1 to
-    # cut the number of expensive gated recomputations while staying within shared-memory limits.
-    if max(R1, R2) >= 1024:
-        return {'BL': 16, 'BD': 128, 'BR1': 128, 'BR2': 256, 'warps': 8, 'stages': 2}
+
+def _pick_decode_resident_config(R2: int) -> dict[str, int]:
     if R2 <= 256:
         return {'BL': 16, 'BD': 128, 'BR1': 64, 'BR2': 256, 'warps': 8, 'stages': 2}
     return {'BL': 16, 'BD': 128, 'BR1': 64, 'BR2': 512, 'warps': 8, 'stages': 3}
+
+
+# ==============================================================
+# Public wrapper
+# ==============================================================
 
 def flashsvd_ffn_swiglu(
     P, V1, U2, V2, b1, b2,
@@ -178,7 +325,7 @@ def flashsvd_ffn_swiglu(
     use_autotune: bool = True,
     num_warps: int = 4,
     num_stages: int = 2,
-    use_decode_specialized: bool | None = None,
+    use_decode_token_kernel: bool | None = None,
 ):
     """
     Computes:
@@ -198,31 +345,30 @@ def flashsvd_ffn_swiglu(
     assert R2_v2 == R2
     assert b1.shape[0] == 2*D and b2.shape[0] == H
 
-    S_dtype = torch.float32 if store_s_fp32 else P.dtype
-    S = torch.empty((B, L, R2), device=P.device, dtype=S_dtype)
-
-    sP_b, sP_l, sP_r1 = P.stride()
-    sV1_r1, sV1_d     = V1.stride()
-    sU2_d, sU2_r2     = U2.stride()
-    sb1               = b1.stride(0)
-    sS_b, sS_l, sS_r2 = S.stride()
-
     use_fp32 = int(P.dtype == torch.float32)
     use_bf16 = int(P.dtype == torch.bfloat16)
+    S_dtype = torch.float32 if store_s_fp32 else P.dtype
 
-    if use_decode_specialized is None:
-        use_decode_specialized = (
+    if use_decode_token_kernel is None:
+        use_decode_token_kernel = (
             B <= DECODE_MAX_BATCH
             and L <= DECODE_MAX_SEQ
             and R2 <= DECODE_MAX_R2
         )
 
-    if use_decode_specialized:
-        # Decode-first path: pin a schedule that uses wider R2 tiles than the generic path.
-        # On small ranks this can collapse pid_r2 to 1; on larger half-rank Llama MLPs it
-        # still materially reduces the number of P@V1 + gating recomputations.
-        cfg = _pick_decode_config(R1, R2)
-        grid = (B, triton.cdiv(L, cfg['BL']), triton.cdiv(R2, cfg['BR2']))
+    if use_decode_token_kernel:
+        # Default decode path: stay on the tensor-core kernel but force an R2-resident
+        # schedule so pid_r2 collapses to 1 and phase1 work is not recomputed across R2 tiles.
+        cfg = _pick_decode_resident_config(R2)
+        S = torch.empty((B, L, R2), device=P.device, dtype=S_dtype)
+
+        sP_b, sP_l, sP_r1 = P.stride()
+        sV1_r1, sV1_d     = V1.stride()
+        sU2_d, sU2_r2     = U2.stride()
+        sb1               = b1.stride(0)
+        sS_b, sS_l, sS_r2 = S.stride()
+
+        grid = (B, triton.cdiv(L, cfg['BL']), 1)
         _fused_ffn_phase1_swiglu_base[grid](
             P, V1, U2, S, b1,
             B, L, D, R1, R2,
@@ -237,41 +383,53 @@ def flashsvd_ffn_swiglu(
             num_warps=cfg['warps'],
             num_stages=cfg['stages'],
         )
-    elif use_autotune:
-        grid = lambda META: (B, triton.cdiv(L, META['BL']), triton.cdiv(R2, META['BR2']))
-        # IMPORTANT: do NOT pass BL/BD/BR*; autotuner provides them.
-        fused_ffn_phase1_swiglu_auto[grid](
-            P, V1, U2, S, b1,
-            B, L, D, R1, R2,
-            sP_b, sP_l, sP_r1,
-            sV1_r1, sV1_d,
-            sU2_d, sU2_r2,
-            sb1,
-            sS_b, sS_l, sS_r2,
-            USE_BF16=use_bf16,
-            USE_FP32=use_fp32,
-        )
-    else:
-        grid = (B, triton.cdiv(L, BL), triton.cdiv(R2, BR2))
-        _fused_ffn_phase1_swiglu_base[grid](
-            P, V1, U2, S, b1,
-            B, L, D, R1, R2,
-            sP_b, sP_l, sP_r1,
-            sV1_r1, sV1_d,
-            sU2_d, sU2_r2,
-            sb1,
-            sS_b, sS_l, sS_r2,
-            BL=BL, BD=BD, BR1=BR1, BR2=BR2,
-            USE_BF16=use_bf16,
-            USE_FP32=use_fp32,
-            num_warps=num_warps,
-            num_stages=num_stages,
-        )
+        S2d = S.reshape(B * L, R2)
+
+    if not use_decode_token_kernel:
+        S = torch.empty((B, L, R2), device=P.device, dtype=S_dtype)
+
+        sP_b, sP_l, sP_r1 = P.stride()
+        sV1_r1, sV1_d     = V1.stride()
+        sU2_d, sU2_r2     = U2.stride()
+        sb1               = b1.stride(0)
+        sS_b, sS_l, sS_r2 = S.stride()
+
+        if use_autotune:
+            grid = lambda META: (B, triton.cdiv(L, META['BL']), triton.cdiv(R2, META['BR2']))
+            # IMPORTANT: do NOT pass BL/BD/BR*; autotuner provides them.
+            fused_ffn_phase1_swiglu_auto[grid](
+                P, V1, U2, S, b1,
+                B, L, D, R1, R2,
+                sP_b, sP_l, sP_r1,
+                sV1_r1, sV1_d,
+                sU2_d, sU2_r2,
+                sb1,
+                sS_b, sS_l, sS_r2,
+                USE_BF16=use_bf16,
+                USE_FP32=use_fp32,
+            )
+        else:
+            grid = (B, triton.cdiv(L, BL), triton.cdiv(R2, BR2))
+            _fused_ffn_phase1_swiglu_base[grid](
+                P, V1, U2, S, b1,
+                B, L, D, R1, R2,
+                sP_b, sP_l, sP_r1,
+                sV1_r1, sV1_d,
+                sU2_d, sU2_r2,
+                sb1,
+                sS_b, sS_l, sS_r2,
+                BL=BL, BD=BD, BR1=BR1, BR2=BR2,
+                USE_BF16=use_bf16,
+                USE_FP32=use_fp32,
+                num_warps=num_warps,
+                num_stages=num_stages,
+            )
+
+        S2d = S.reshape(B * L, R2)
 
     # Decode-friendly epilogue: flatten (B,L) -> (B*L) and use addmm to fuse bias into GEMM.
     # This avoids a separate bias-add kernel and tends to be faster than (B,L,R2) @ (R2,H) batched matmul
     # when L is small (e.g., L=1).
-    S2d = S.reshape(B * L, R2)
     Y2d = torch.addmm(b2, S2d, V2)  # [B*L, H]
     Y = Y2d.reshape(B, L, H)
     return Y
@@ -558,170 +716,3 @@ if __name__ == "__main__":
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# #!/usr/bin/env python3
-# import torch
-# import triton
-# import triton.language as tl
-# import torch.nn.functional as F
-
-# # -----------------------------
-# # Triton kernel (SwiGLU in rank space)
-# # -----------------------------
-# @triton.jit
-# def fused_ffn_phase1_swiglu(
-#     P_ptr, V1_ptr, U2_ptr, S_ptr, b1_ptr,
-#     B, L, D, R1, R2,
-#     sP_b, sP_l, sP_r1,
-#     sV1_r1, sV1_d,
-#     sU2_d, sU2_r2,
-#     sb1,
-#     sS_b, sS_l, sS_r2,
-#     BL: tl.constexpr, BD: tl.constexpr, BR1: tl.constexpr, BR2: tl.constexpr,
-# ):
-#     pid_b  = tl.program_id(0)
-#     pid_l  = tl.program_id(1)
-#     pid_r2 = tl.program_id(2)
-
-#     offs_l  = pid_l * BL + tl.arange(0, BL)
-#     offs_r2 = pid_r2 * BR2 + tl.arange(0, BR2)
-
-#     Tu_acc = tl.zeros((BL, BD), dtype=tl.float32)
-#     Tv_acc = tl.zeros((BL, BD), dtype=tl.float32)
-#     acc    = tl.zeros((BL, BR2), dtype=tl.float32)
-
-#     for d0 in range(0, D, BD):
-#         d   = d0 + tl.arange(0, BD)
-#         m_d = d < D
-
-#         Tu_acc *= 0.0
-#         Tv_acc *= 0.0
-
-#         for r1_0 in range(0, R1, BR1):
-#             r1   = r1_0 + tl.arange(0, BR1)
-#             m_r1 = r1 < R1
-
-#             P_blk = tl.load(
-#                 P_ptr + pid_b * sP_b + offs_l[:, None]*sP_l + r1[None, :]*sP_r1,
-#                 mask=(offs_l[:, None] < L) & m_r1[None, :],
-#                 other=0.0
-#             )
-
-#             V1u_blk = tl.load(
-#                 V1_ptr + r1[:, None]*sV1_r1 + d[None, :]*sV1_d,
-#                 mask=m_r1[:, None] & m_d[None, :],
-#                 other=0.0
-#             )
-
-#             V1v_blk = tl.load(
-#                 V1_ptr + r1[:, None]*sV1_r1 + (d[None, :] + D)*sV1_d,
-#                 mask=m_r1[:, None] & m_d[None, :],
-#                 other=0.0
-#             )
-
-#             Tu_acc += tl.dot(P_blk, V1u_blk)
-#             Tv_acc += tl.dot(P_blk, V1v_blk)
-
-#         b1u = tl.load(b1_ptr + d*sb1,        mask=m_d, other=0.0).to(tl.float32)
-#         b1v = tl.load(b1_ptr + (d + D)*sb1,  mask=m_d, other=0.0).to(tl.float32)
-#         Tu  = Tu_acc + b1u[None, :]
-#         Tv  = Tv_acc + b1v[None, :]
-
-#         # SwiGLU: silu(Tu) * Tv, where silu(z) = z * sigmoid(z)
-#         Hu = Tu * (1.0 / (1.0 + tl.exp(-Tu)))
-#         H  = Hu * Tv
-
-#         U2_blk = tl.load(
-#             U2_ptr + d[:, None]*sU2_d + offs_r2[None, :]*sU2_r2,
-#             mask=m_d[:, None] & (offs_r2[None, :] < R2),
-#             other=0.0
-#         ).to(tl.float32)
-#         acc += tl.dot(H, U2_blk)
-
-#     mask = (offs_l[:, None] < L) & (offs_r2[None, :] < R2)
-#     tl.store(
-#         S_ptr + pid_b*sS_b + offs_l[:, None]*sS_l + offs_r2[None, :]*sS_r2,
-#         acc, mask=mask
-#     )
-
-
-# # -----------------------------
-# # Wrapper
-# # -----------------------------
-# def flashsvd_ffn_swiglu(
-#     P, V1, U2, V2, b1, b2,
-#     BL=64, BD=64, BR1=64, BR2=64,
-#     *, store_s_fp32: bool = False,
-# ):
-#     assert P.is_cuda and V1.is_cuda and U2.is_cuda and V2.is_cuda
-#     B, L, R1 = P.shape
-#     R1_v1, twoD = V1.shape
-#     D = twoD // 2
-#     assert R1_v1 == R1 and twoD == 2 * D
-#     D_u2, R2 = U2.shape
-#     assert D_u2 == D
-#     R2_v2, H = V2.shape
-#     assert R2_v2 == R2
-#     assert b1.shape[0] == 2*D and b2.shape[0] == H
-
-#     S_dtype = torch.float32 if store_s_fp32 else P.dtype
-#     S = torch.empty((B, L, R2), device=P.device, dtype=S_dtype)
-
-#     strides = dict(
-#         sP_b=P.stride(0), sP_l=P.stride(1), sP_r1=P.stride(2),
-#         sV1_r1=V1.stride(0), sV1_d=V1.stride(1),
-#         sU2_d=U2.stride(0), sU2_r2=U2.stride(1),
-#         sb1=b1.stride(0),
-#         sS_b=S.stride(0), sS_l=S.stride(1), sS_r2=S.stride(2),
-#     )
-
-#     grid = (B, triton.cdiv(L, BL), triton.cdiv(R2, BR2))
-#     fused_ffn_phase1_swiglu[grid](
-#         P, V1, U2, S, b1,
-#         B, L, D, R1, R2,
-#         *strides.values(),
-#         BL, BD, BR1, BR2,
-#     )
-
-#     Y = S.matmul(V2)
-#     Y = Y + b2.view(1, 1, -1)
-#     return Y
-
-
-# # -----------------------------
-# # PyTorch reference
-# # -----------------------------
-# def _pt_baseline_swiglu(P, V1, U2, V2, b1, b2):
-#     Z  = P.matmul(V1) + b1.view(1, 1, -1)
-#     Zu, Zv = Z.split(Z.shape[-1] // 2, dim=-1)
-#     H  = F.silu(Zu) * Zv
-#     S  = H.matmul(U2)
-#     Y  = S.matmul(V2) + b2.view(1, 1, -1)
-#     return Y
