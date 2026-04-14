@@ -1,0 +1,19 @@
+==== FlashSVD vs SVD Decode Benchmark ====
+Config: prompt_len=512 new_tokens=512 warmup=3 batch=1 dtype=bf16 device=cuda ffn_backend=flashsvd_mlp_dual_split_prod mlp_cuda_graph=1 scope=layer_tail baseline_dense_kvcache=0 cutlass_ropeattn=0
+
+[Low-Rank baseline]
+[StaticCache] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=1028 (REP=1, non-GQA)
+=== KV-Cache Prefill/Decode Benchmark ===
+Prefill: prompt_len=512 | time 0.440s | 1,165 tok/s
+Decode : new_tokens=512 | time 15.417s | 30.112 ms/token | 33 tok/s
+
+[FlashSVD]
+[FlashSVD-v1.5] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=1028 (REP=1, non-GQA)
+=== KV-Cache Prefill/Decode Benchmark ===
+Prefill: prompt_len=512 | time 0.098s | 5,209 tok/s
+Decode : new_tokens=512 | time 4.919s | 9.607 ms/token | 104 tok/s
+
+---- Summary ----
+SVD decode: 30.112 ms/token | 33 tok/s
+FlashSVD decode: 9.607 ms/token | 104 tok/s
+FlashSVD speedup vs SVD: 3.13x

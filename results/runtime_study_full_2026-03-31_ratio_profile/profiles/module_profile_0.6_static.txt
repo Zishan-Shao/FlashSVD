@@ -1,0 +1,27 @@
+[StaticCache] H=32 Hk=32 REP=1 Dh=128 R=2457 max_cache_len=564 (REP=1, non-GQA)
+=== KV-Cache Prefill/Decode Benchmark ===
+Prefill: prompt_len=512 | time 0.164s | 3,122 tok/s
+Decode : new_tokens=32 | time 1.174s | 36.702 ms/token | 27 tok/s
+
+=== Decode Profile (module CUDA time) ===
+Avg over 16 steps @ seq≈547 | total_forward 43.874 ms/token
+  attn_total  :   19.830 ms ( 45.2%)
+  mlp_total   :    8.049 ms ( 18.3%)
+  ln1_total   :    4.682 ms ( 10.7%)
+  ln2_total   :    4.552 ms ( 10.4%)
+  lm_head     :    0.196 ms (  0.4%)
+  final_norm  :    0.139 ms (  0.3%)
+  embed_tokens:    0.053 ms (  0.1%)
+  other       :    6.375 ms ( 14.5%)
+Top 10/10 modules:
+  layer0.attn     :    0.634 ms (  1.4%)
+  layer1.attn     :    0.627 ms (  1.4%)
+  layer3.attn     :    0.627 ms (  1.4%)
+  layer6.attn     :    0.624 ms (  1.4%)
+  layer24.attn    :    0.623 ms (  1.4%)
+  layer26.attn    :    0.623 ms (  1.4%)
+  layer22.attn    :    0.622 ms (  1.4%)
+  layer13.attn    :    0.621 ms (  1.4%)
+  layer25.attn    :    0.621 ms (  1.4%)
+  layer2.attn     :    0.620 ms (  1.4%)
+

@@ -1,0 +1,23 @@
+{
+  "gold_reference": "fp32_no_cache_reference",
+  "systems": {
+    "static_cache_fp32": {
+      "exact_match_count": 20,
+      "exact_match_rate": 1.0,
+      "first_token_match_count": 20,
+      "first_token_match_rate": 1.0,
+      "mean_token_match": 1.0,
+      "median_token_match": 1.0,
+      "num_divergent_prompts": 0,
+      "mean_first_divergence_step_over_divergent": null
+    },
+    "densekv_baseline_fp32": {
+      "supported": false,
+      "reason": "flash_attn_with_kvcache only supports fp16 and bf16"
+    },
+    "flashsvd_prod_fp32": {
+      "supported": false,
+      "reason": "flash_attn_with_kvcache only supports fp16 and bf16"
+    }
+  }
+}

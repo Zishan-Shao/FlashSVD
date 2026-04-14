@@ -1,0 +1,19 @@
+{
+  "ratio": "0.7",
+  "mode": "densekv",
+  "baseline_label": "DenseKVCacheBaseline",
+  "config": "long",
+  "prompt_len": 2048,
+  "new_tokens": 128,
+  "run": 5,
+  "batch_size": 1,
+  "prefill_time_s": 0.5349085920024663,
+  "decode_time_s": 3.252277644816786,
+  "prefill_tok_s": 3828.691538367657,
+  "decode_tok_s": 39.35703343286079,
+  "decode_ms_per_token": 25.40841910013114,
+  "lowrank_cache": false,
+  "flashsvd_dense_cache": false,
+  "baseline_dense_kvcache": true,
+  "total_time_s": 3.7871862368192524
+}

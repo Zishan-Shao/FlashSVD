@@ -1,0 +1,19 @@
+{
+  "ratio": "0.6",
+  "mode": "flashsvd",
+  "baseline_label": "FlashSVD-v1.5",
+  "config": "long",
+  "prompt_len": 2048,
+  "new_tokens": 128,
+  "run": 4,
+  "batch_size": 1,
+  "prefill_time_s": 0.4288135739043355,
+  "decode_time_s": 1.8743309860583395,
+  "prefill_tok_s": 4775.968217034311,
+  "decode_tok_s": 68.29103341517074,
+  "decode_ms_per_token": 14.643210828580777,
+  "lowrank_cache": false,
+  "flashsvd_dense_cache": true,
+  "baseline_dense_kvcache": false,
+  "total_time_s": 2.303144559962675
+}

@@ -1,0 +1,28 @@
+[FlashSVD-v1.5] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=564 (REP=1, non-GQA)
+=== KV-Cache Prefill/Decode Benchmark ===
+Prefill: prompt_len=512 | time 0.426s | 1,202 tok/s
+Decode : new_tokens=32 | time 0.953s | 29.767 ms/token | 34 tok/s
+
+=== Decode Profile (module CUDA time) ===
+Avg over 16 steps @ seq≈547 | total_forward 36.098 ms/token
+  attn_total  :   15.137 ms ( 41.9%)
+  mlp_total   :    7.584 ms ( 21.0%)
+  ln1_total   :    3.667 ms ( 10.2%)
+  ln2_total   :    3.585 ms (  9.9%)
+  lm_head     :    0.198 ms (  0.5%)
+  final_norm  :    0.110 ms (  0.3%)
+  embed_tokens:    0.044 ms (  0.1%)
+  other       :    5.774 ms ( 16.0%)
+Top 10/10 modules:
+  layer8.attn     :    0.622 ms (  1.7%)
+  layer18.attn    :    0.532 ms (  1.5%)
+  layer0.attn     :    0.481 ms (  1.3%)
+  layer2.attn     :    0.476 ms (  1.3%)
+  layer13.attn    :    0.472 ms (  1.3%)
+  layer1.attn     :    0.470 ms (  1.3%)
+  layer27.attn    :    0.469 ms (  1.3%)
+  layer21.attn    :    0.469 ms (  1.3%)
+  layer24.attn    :    0.468 ms (  1.3%)
+  layer25.attn    :    0.468 ms (  1.3%)
+
+RESULT_DICT {'prompt_len': 512, 'new_tokens': 32, 'batch_size': 1, 'prefill_time_s': 0.4259088390972465, 'decode_time_s': 0.9525579770561308, 'prefill_tok_s': 1202.1351824611852, 'decode_tok_s': 33.59375573011905, 'decode_ms_per_token': 29.767436783004086, 'lowrank_cache': False, 'flashsvd_dense_cache': True, 'baseline_dense_kvcache': False}

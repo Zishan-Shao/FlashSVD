@@ -1,0 +1,20 @@
+{
+  "prompt_len": 512,
+  "new_tokens": 64,
+  "batch_size": 1,
+  "prefill_time_s": 0.04459854308515787,
+  "decode_time_s": 0.734514974988997,
+  "prefill_tok_s": 11480.195642767321,
+  "decode_tok_s": 87.13232837895336,
+  "decode_ms_per_token": 11.476796484203078,
+  "lowrank_cache": false,
+  "flashsvd_dense_cache": true,
+  "baseline_dense_kvcache": false,
+  "total_time_s": 0.7791135180741549,
+  "study": "decode_sweep",
+  "ratio": "0.5",
+  "mode": "flashsvd",
+  "mode_label": "FlashSVD-v1.5",
+  "config": "tok64",
+  "run_idx": 1
+}

@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="760" viewBox="0 0 1280 760">
+<rect width="1280" height="760" fill="white"/>
+<text x="300.00" y="52.00" font-size="30" fill="#1F2937" font-weight="bold" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Top Op Classes Before Graph Fusion</text>
+<text x="300.00" y="84.00" font-size="16" fill="#4B5563" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Prompt_len=512, no-graph FlashSVD path. This is why the old serving path felt noisy.</text>
+<line x1="300.00" y1="120.00" x2="300.00" y2="660.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="300.00" y="684.00" font-size="13" fill="#6B7280" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">0.0</text>
+<line x1="480.00" y1="120.00" x2="480.00" y2="660.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="480.00" y="684.00" font-size="13" fill="#6B7280" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">270.0</text>
+<line x1="660.00" y1="120.00" x2="660.00" y2="660.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="660.00" y="684.00" font-size="13" fill="#6B7280" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">540.0</text>
+<line x1="840.00" y1="120.00" x2="840.00" y2="660.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="840.00" y="684.00" font-size="13" fill="#6B7280" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">810.1</text>
+<line x1="1020.00" y1="120.00" x2="1020.00" y2="660.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="1020.00" y="684.00" font-size="13" fill="#6B7280" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">1080.1</text>
+<line x1="1200.00" y1="120.00" x2="1200.00" y2="660.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="1200.00" y="684.00" font-size="13" fill="#6B7280" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">1350.1</text>
+<line x1="300.00" y1="120.00" x2="300.00" y2="660.00" stroke="#2D3748" stroke-width="2"/>
+<line x1="300.00" y1="660.00" x2="1200.00" y2="660.00" stroke="#2D3748" stroke-width="2"/>
+<text x="750.00" y="736.00" font-size="16" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">count / token</text>
+<rect x="300.00" y="130.80" width="213.98" height="32.40" fill="#5B6577" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="288.00" y="152.00" font-size="14" fill="#1F2937" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">aten::linear</text>
+<text x="521.98" y="152.00" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">321.0</text>
+<rect x="300.00" y="184.80" width="235.98" height="32.40" fill="#5B6577" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="288.00" y="206.00" font-size="14" fill="#1F2937" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">aten::matmul</text>
+<text x="543.98" y="206.00" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">354.0</text>
+<rect x="300.00" y="238.80" width="235.32" height="32.40" fill="#5B6577" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="288.00" y="260.00" font-size="14" fill="#1F2937" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">aten::mm</text>
+<text x="543.32" y="260.00" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">353.0</text>
+<rect x="300.00" y="292.80" width="782.61" height="32.40" fill="#5B6577" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="288.00" y="314.00" font-size="14" fill="#1F2937" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">cudaLaunchKernel</text>
+<text x="1090.61" y="314.00" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">1174.0</text>
+<rect x="300.00" y="346.80" width="156.66" height="32.40" fill="#5B6577" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="288.00" y="368.00" font-size="14" fill="#1F2937" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">aten::to</text>
+<text x="464.66" y="368.00" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">235.0</text>
+<rect x="300.00" y="400.80" width="111.33" height="32.40" fill="#5B6577" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="288.00" y="422.00" font-size="14" fill="#1F2937" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">aten::_to_copy</text>
+<text x="419.33" y="422.00" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">167.0</text>
+<rect x="300.00" y="454.80" width="132.66" height="32.40" fill="#5B6577" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="288.00" y="476.00" font-size="14" fill="#1F2937" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">aten::copy_</text>
+<text x="440.66" y="476.00" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">199.0</text>
+<rect x="300.00" y="508.80" width="109.33" height="32.40" fill="#5B6577" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="288.00" y="530.00" font-size="14" fill="#1F2937" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">aten::mul</text>
+<text x="417.33" y="530.00" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">164.0</text>
+<rect x="300.00" y="562.80" width="85.99" height="32.40" fill="#5B6577" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="288.00" y="584.00" font-size="14" fill="#1F2937" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">aten::add</text>
+<text x="393.99" y="584.00" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">129.0</text>
+<rect x="300.00" y="616.80" width="213.98" height="32.40" fill="#5B6577" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="288.00" y="638.00" font-size="14" fill="#1F2937" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">aten::t</text>
+<text x="521.98" y="638.00" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">321.0</text>
+</svg>

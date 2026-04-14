@@ -1,0 +1,15 @@
+==== FlashSVD Decode Correctness ====
+Config: B=1 prompt_len=11 decode_steps=64 dtype=bf16 graph=1 flash_dense_attn=1 baseline_dense_kvcache=0 reference_dense_attn=0 test_backend=flashsvd_mlp_dual_split_prod prompt_source=text
+baseline full_seq_ce=7.656250 decode_ce=12.562500
+- flash_legacy: full_max_abs=0.453125 full_mean_abs=0.0598145 full_rel_linf=0.0175971 full_ce=7.656250 | decode_max_abs=0.46875 decode_mean_abs=0.0446777 decode_rel_linf=0.0213068 decode_ce=12.562500 | greedy_token_match=0.015625
+- flash_test: full_max_abs=0.75 full_mean_abs=0.128906 full_rel_linf=0.0291262 full_ce=7.656250 | decode_max_abs=0.59375 decode_mean_abs=0.074707 decode_rel_linf=0.0269886 decode_ce=12.562500 | greedy_token_match=1.000000
+Prompt token ids: [21967, 7597, 29928, 15592, 1078, 4482, 29899, 10003, 4086, 4733, 491]
+Greedy token ids:
+- baseline    : [278, 671, 310, 278, 4086, 29915, 29879, 4086, 29915, 29879, 4086, 29915, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525]
+- flash_legacy: [263, 29871, 29896, 29929, 29955, 29900, 29879, 16867, 29889, 450, 29871, 29896, 29929, 29955, 29900, 29879, 16867, 338, 263, 5735, 16867, 310, 263, 5735, 16867, 310, 263, 5735, 16867, 310, 263, 5735, 16867, 310, 263, 5735, 16867, 310, 263, 5735, 16867, 310, 263, 5735, 16867, 310, 263, 5735, 16867, 310, 263, 5735, 16867, 310, 263, 5735, 16867, 310, 263, 5735, 16867, 310, 263, 5735]
+- flash_test  : [278, 671, 310, 278, 4086, 29915, 29879, 4086, 29915, 29879, 4086, 29915, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525, 29879, 4086, 525]
+Greedy decoded text:
+- prompt       : 'FlashSVD accelerates low-rank language models by'
+- baseline    : "the use of the language's language's language' 's language 's language 's language 's language 's language 's language 's language 's language 's language 's language 's language 's language 's language 's language 's language 's language 's language '"
+- flash_legacy: 'a 1970s recording. The 1970s recording is a live recording of a live recording of a live recording of a live recording of a live recording of a live recording of a live recording of a live recording of a live recording of a live recording of a live recording of a live'
+- flash_test  : "the use of the language's language's language' 's language 's language 's language 's language 's language 's language 's language 's language 's language 's language 's language 's language 's language 's language 's language 's language 's language '"

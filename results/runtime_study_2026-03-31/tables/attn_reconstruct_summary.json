@@ -1,0 +1,10 @@
+{
+  "layers": 32,
+  "exact_ms_mean": 0.2522125,
+  "packed_linear_ms_mean": 0.14837499999999998,
+  "packed_flat_ms_mean": 0.127765625,
+  "packed_linear_speedup_mean": 1.70003125,
+  "packed_linear_speedup_median": 1.699,
+  "packed_flat_speedup_mean": 1.974125,
+  "packed_flat_speedup_median": 1.976
+}

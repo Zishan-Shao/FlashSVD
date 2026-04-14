@@ -1,0 +1,14 @@
+[
+  {
+    "prompt": "The capital of France is",
+    "generated_text": "Paris.\nThe capital of France is Paris.\nThe capital of France is Paris.\nThe capital of France is Paris.\nThe capital of France is Paris.\nThe capital of France is Paris.\nThe capital of France is Paris.\nThe capital of France is Paris.\nThe capital of France is"
+  },
+  {
+    "prompt": "FlashSVD accelerates low-rank language models by",
+    "generated_text": "using a GPU to accelerate the SVD decomposition.\n\n\\subsection{Low-rank Language Models}\n\nLow-rank language models are a special class of neural language models that are designed to be efficient to train and to run on a GPU. They are designed to be efficient to train and"
+  },
+  {
+    "prompt": "In a future where AI systems assist scientific research,",
+    "generated_text": "it is important to understand the impact of AI bias on the scientific research process.\n\n\\subsection{AI bias in scientific research}\n\nAI systems can be used to assist in scientific research by providing data to support or challenge scientific theories. For example, AI systems can be used to analyze scientific data to"
+  }
+]

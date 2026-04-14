@@ -1,0 +1,9 @@
+pair_key,baseline,config,label,baseline_prefill_s,baseline_decode_s,baseline_decode_ms,baseline_total_s,flashsvd_prefill_s,flashsvd_decode_s,flashsvd_decode_ms,flashsvd_total_s,decode_speedup_median,total_speedup_median
+static_vs_flashsvd:short,StaticCache,512 / 32,"StaticCache
+512 / 32",0.452,0.954,29.814,1.406,0.079,0.319,9.98,0.4,2.987374749498998,3.5149999999999997
+static_vs_flashsvd:long,StaticCache,2048 / 128,"StaticCache
+2048 / 128",0.578,3.84,30.001,4.401,0.152,1.292,10.097,1.454,2.9712785976032485,3.0268225584594224
+densekv_vs_flashsvd:short,DenseKVCacheBaseline,512 / 32,"DenseKVCacheBaseline
+512 / 32",0.424,1.049,32.794,1.4769999999999999,0.066,0.321,10.022,0.387,3.2722011574536016,3.816537467700258
+densekv_vs_flashsvd:long,DenseKVCacheBaseline,2048 / 128,"DenseKVCacheBaseline
+2048 / 128",0.544,4.195,32.771,4.728000000000001,0.147,1.304,10.189,1.451,3.216311708705467,3.2584424534803587

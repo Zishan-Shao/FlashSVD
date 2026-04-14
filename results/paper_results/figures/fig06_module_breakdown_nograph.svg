@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="760" viewBox="0 0 1180 760">
+<rect width="1180" height="760" fill="white"/>
+<text x="120.00" y="52.00" font-size="30" fill="#1F2937" font-weight="bold" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Module Breakdown Before Full Graph Fusion</text>
+<text x="120.00" y="84.00" font-size="16" fill="#4B5563" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Representative decode profile at prompt_len=512, new_tokens=32. The graph path collapses this body into a replayed layer unit.</text>
+<line x1="120.00" y1="620.00" x2="1100.00" y2="620.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="625.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">0.00</text>
+<line x1="120.00" y1="520.00" x2="1100.00" y2="520.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="525.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">9.41</text>
+<line x1="120.00" y1="420.00" x2="1100.00" y2="420.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="425.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">18.81</text>
+<line x1="120.00" y1="320.00" x2="1100.00" y2="320.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="325.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">28.22</text>
+<line x1="120.00" y1="220.00" x2="1100.00" y2="220.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="225.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">37.62</text>
+<line x1="120.00" y1="120.00" x2="1100.00" y2="120.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="125.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">47.03</text>
+<line x1="120.00" y1="120.00" x2="120.00" y2="620.00" stroke="#2D3748" stroke-width="2"/>
+<line x1="120.00" y1="620.00" x2="1100.00" y2="620.00" stroke="#2D3748" stroke-width="2"/>
+<text x="30.00" y="370.00" font-size="16" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" transform="rotate(-90.00 30.00 370.00)">ms / token</text>
+<rect x="265.19" y="444.25" width="181.48" height="175.75" fill="#2F6BFF" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<rect x="265.19" y="379.30" width="181.48" height="64.95" fill="#E67E22" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<rect x="265.19" y="299.67" width="181.48" height="79.62" fill="#8E44AD" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<rect x="265.19" y="230.17" width="181.48" height="69.50" fill="#95A5A6" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<text x="355.93" y="652.00" font-size="15" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">StaticCache</text>
+<text x="355.93" y="220.17" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">37.01</text>
+<rect x="591.85" y="405.36" width="181.48" height="214.64" fill="#2F6BFF" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<rect x="591.85" y="337.32" width="181.48" height="68.04" fill="#E67E22" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<rect x="591.85" y="252.54" width="181.48" height="84.78" fill="#8E44AD" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<rect x="591.85" y="188.93" width="181.48" height="63.61" fill="#95A5A6" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<text x="682.59" y="652.00" font-size="15" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">DenseKV</text>
+<text x="682.59" y="178.93" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">40.89</text>
+<rect x="918.52" y="459.06" width="181.48" height="160.94" fill="#2F6BFF" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<rect x="918.52" y="378.43" width="181.48" height="80.63" fill="#E67E22" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<rect x="918.52" y="301.32" width="181.48" height="77.10" fill="#8E44AD" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<rect x="918.52" y="239.93" width="181.48" height="61.39" fill="#95A5A6" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<text x="1009.26" y="643.00" font-size="15" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">FlashSVD</text>
+<text x="1009.26" y="661.00" font-size="15" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">no-graph</text>
+<text x="1009.26" y="229.93" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">36.10</text>
+<rect x="880.00" y="26.00" width="18.00" height="18.00" fill="#2F6BFF" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<text x="908.00" y="40.00" font-size="14" fill="#1F2937" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Attention</text>
+<rect x="880.00" y="52.00" width="18.00" height="18.00" fill="#E67E22" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<text x="908.00" y="66.00" font-size="14" fill="#1F2937" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">MLP</text>
+<rect x="880.00" y="78.00" width="18.00" height="18.00" fill="#8E44AD" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<text x="908.00" y="92.00" font-size="14" fill="#1F2937" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">LayerNorm</text>
+<rect x="880.00" y="104.00" width="18.00" height="18.00" fill="#95A5A6" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<text x="908.00" y="118.00" font-size="14" fill="#1F2937" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Other</text>
+</svg>

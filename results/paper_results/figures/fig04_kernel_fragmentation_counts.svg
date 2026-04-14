@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="760" viewBox="0 0 1240 760">
+<rect width="1240" height="760" fill="white"/>
+<text x="120.00" y="52.00" font-size="30" fill="#1F2937" font-weight="bold" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Why the Old Path Was Fragmented</text>
+<text x="120.00" y="84.00" font-size="16" fill="#4B5563" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Per-token runtime bookkeeping on prompt_len=512. Counts are nearly unchanged at prompt_len=2048.</text>
+<line x1="120.00" y1="620.00" x2="1180.00" y2="620.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="625.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">0.00</text>
+<line x1="120.00" y1="520.00" x2="1180.00" y2="520.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="525.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">270.02</text>
+<line x1="120.00" y1="420.00" x2="1180.00" y2="420.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="425.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">540.04</text>
+<line x1="120.00" y1="320.00" x2="1180.00" y2="320.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="325.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">810.06</text>
+<line x1="120.00" y1="220.00" x2="1180.00" y2="220.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="225.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">1080.08</text>
+<line x1="120.00" y1="120.00" x2="1180.00" y2="120.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="125.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">1350.10</text>
+<line x1="120.00" y1="120.00" x2="120.00" y2="620.00" stroke="#2D3748" stroke-width="2"/>
+<line x1="120.00" y1="620.00" x2="1180.00" y2="620.00" stroke="#2D3748" stroke-width="2"/>
+<text x="28.00" y="370.00" font-size="16" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" transform="rotate(-90.00 28.00 370.00)">calls / token</text>
+<rect x="157.10" y="185.22" width="55.60" height="434.78" fill="#7A8799" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="184.90" y="175.22" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">1174.00</text>
+<rect x="220.70" y="386.68" width="55.60" height="233.32" fill="#F39C12" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="248.50" y="376.68" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">630.00</text>
+<rect x="284.30" y="600.00" width="55.60" height="20.00" fill="#0B8F5A" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="312.10" y="590.00" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">54.00</text>
+<text x="252.50" y="654.00" font-size="15" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">cudaLaunch</text>
+<rect x="422.10" y="620.00" width="55.60" height="0.00" fill="#7A8799" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="449.90" y="610.00" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">0.00</text>
+<rect x="485.70" y="596.30" width="55.60" height="23.70" fill="#F39C12" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="513.50" y="586.30" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">64.00</text>
+<rect x="549.30" y="608.15" width="55.60" height="11.85" fill="#0B8F5A" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="577.10" y="598.15" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">32.00</text>
+<text x="517.50" y="654.00" font-size="15" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">cudaGraph</text>
+<rect x="687.10" y="546.30" width="55.60" height="73.70" fill="#7A8799" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="714.90" y="536.30" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">199.00</text>
+<rect x="750.70" y="498.90" width="55.60" height="121.10" fill="#F39C12" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="778.50" y="488.90" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">327.00</text>
+<rect x="814.30" y="570.00" width="55.60" height="50.00" fill="#0B8F5A" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="842.10" y="560.00" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">135.00</text>
+<text x="782.50" y="654.00" font-size="15" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">copy_</text>
+<rect x="952.10" y="471.12" width="55.60" height="148.88" fill="#7A8799" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="979.90" y="461.12" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">402.00</text>
+<rect x="1015.70" y="471.12" width="55.60" height="148.88" fill="#F39C12" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="1043.50" y="461.12" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">402.00</text>
+<rect x="1079.30" y="589.63" width="55.60" height="30.37" fill="#0B8F5A" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="1107.10" y="579.63" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">82.00</text>
+<text x="1047.50" y="654.00" font-size="15" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">to/_to_copy</text>
+<rect x="940.00" y="26.00" width="18.00" height="18.00" fill="#7A8799" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<text x="968.00" y="40.00" font-size="14" fill="#1F2937" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">No graph</text>
+<rect x="940.00" y="52.00" width="18.00" height="18.00" fill="#F39C12" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<text x="968.00" y="66.00" font-size="14" fill="#1F2937" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Split graph</text>
+<rect x="940.00" y="78.00" width="18.00" height="18.00" fill="#0B8F5A" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<text x="968.00" y="92.00" font-size="14" fill="#1F2937" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Per-layer graph</text>
+</svg>

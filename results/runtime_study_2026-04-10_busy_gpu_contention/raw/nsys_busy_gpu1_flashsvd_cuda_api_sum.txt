@@ -1,0 +1,21 @@
+Nsight Systems API summary for a short busy-GPU FlashSVD trace.
+
+Caveat:
+
+- this trace includes model load and prefill, so it is not a pure steady-state decode trace
+
+Top API entries:
+
+- `cudaMemcpyAsync`: `69.2%`
+- `cudaMalloc`: `16.3%`
+- `cudaLaunchKernel`: `5.3%`
+- `cudaStreamSynchronize`: `4.8%`
+- `cudaDeviceSynchronize`: `2.2%`
+- `cudaFree`: `0.8%`
+- `cudaGraphInstantiateWithFlags_v11040`: `0.2%`
+- `cudaGraphLaunch_v10000`: `0.1%`
+
+Key takeaway:
+
+- `cudaGraphLaunch` is visible but small in the total API-time picture
+- this does not support the story that graph launch itself becomes the dominant CPU-side bottleneck on the busy GPU

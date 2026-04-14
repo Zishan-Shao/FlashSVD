@@ -1,0 +1,4 @@
+L,direct_winner,winner_ms,flashsvd_v15_ms,sparse_ms,sparse_fa2_only_ms,dense_fa2_only_ms
+512,FlashSVD-v1.5+graph,0.1016,0.1016,4.327,0.4389,0.2075
+2048,FlashSVD-v1.5+graph,0.1183,0.1183,7.9756,0.4509,0.2137
+4096,FlashSVD-v1.5+graph,0.139,0.139,13.4465,0.7313,0.2114

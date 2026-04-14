@@ -1,0 +1,20 @@
+Skipping import of cpp extensions due to incompatible torch version 2.9.1+cu128 for torchao version 0.16.0             Please see https://github.com/pytorch/ao/issues/2919 for more info
+==== FlashSVD vs SVD Decode Benchmark ====
+Config: prompt_len=256 new_tokens=16 warmup=3 batch=1 dtype=bf16 device=cuda:0 ffn_backend=flashsvd_mlp_dual_split_prod mlp_cuda_graph=1 scope=layer_tail baseline_dense_kvcache=0 cutlass_ropeattn=0
+
+[Low-Rank baseline]
+[StaticCache] H=32 Hk=32 REP=1 Dh=128 R=1628 max_cache_len=276 (REP=1, non-GQA)
+=== KV-Cache Prefill/Decode Benchmark ===
+Prefill: prompt_len=256 | time 0.820s | 312 tok/s
+Decode : new_tokens=16 | time 0.604s | 37.741 ms/token | 26 tok/s
+
+[FlashSVD]
+[FlashSVD-v1.5] H=32 Hk=32 REP=1 Dh=128 R=1628 max_cache_len=276 (REP=1, non-GQA)
+=== KV-Cache Prefill/Decode Benchmark ===
+Prefill: prompt_len=256 | time 0.093s | 2,758 tok/s
+Decode : new_tokens=16 | time 0.447s | 27.945 ms/token | 36 tok/s
+
+---- Summary ----
+SVD decode: 37.741 ms/token | 26 tok/s
+FlashSVD decode: 27.945 ms/token | 36 tok/s
+FlashSVD speedup vs SVD: 1.35x

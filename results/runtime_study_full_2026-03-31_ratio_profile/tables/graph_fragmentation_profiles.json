@@ -1,0 +1,742 @@
+{
+  "0.5": {
+    "nograph": {
+      "tracked_ops": {
+        "cudaLaunchKernel": {
+          "count": 17248,
+          "cpu_ms": 100.93118099999441,
+          "self_cpu_ms": 99.62535799999443,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "cudaGraphLaunch": {
+          "count": 0,
+          "cpu_ms": 0.0,
+          "self_cpu_ms": 0.0,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::copy_": {
+          "count": 3184,
+          "cpu_ms": 45.219561999999485,
+          "self_cpu_ms": 19.20403800000149,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::clone": {
+          "count": 0,
+          "cpu_ms": 0.0,
+          "self_cpu_ms": 0.0,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::to": {
+          "count": 3760,
+          "cpu_ms": 61.72499099999976,
+          "self_cpu_ms": 3.0223829999989302,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::_to_copy": {
+          "count": 2672,
+          "cpu_ms": 58.70260800000083,
+          "self_cpu_ms": 9.255845000000546,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "cudaMemcpyAsync": {
+          "count": 528,
+          "cpu_ms": 6.37401299999984,
+          "self_cpu_ms": 6.37401299999984,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        }
+      },
+      "cudaLaunchKernel_per_token": 1078.0,
+      "cudaGraphLaunch_per_token": 0.0,
+      "copy_per_token": 199.0,
+      "clone_per_token": 0.0,
+      "to_copy_per_token": 402.0,
+      "launch_cpu_ms_per_token": 6.308198812499651,
+      "copy_clone_cpu_ms_per_token": 2.826222624999968,
+      "decode_ms_per_token": 78.56985473632812
+    },
+    "split": {
+      "tracked_ops": {
+        "cudaLaunchKernel": {
+          "count": 12064,
+          "cpu_ms": 75.09259200004122,
+          "self_cpu_ms": 75.09259200004122,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "cudaGraphLaunch": {
+          "count": 1024,
+          "cpu_ms": 22.907905000013095,
+          "self_cpu_ms": 21.55712800001426,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::copy_": {
+          "count": 5424,
+          "cpu_ms": 80.94030400000824,
+          "self_cpu_ms": 28.296860999993513,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::clone": {
+          "count": 1120,
+          "cpu_ms": 24.958584999965147,
+          "self_cpu_ms": 3.4240389999634844,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::to": {
+          "count": 3760,
+          "cpu_ms": 62.95448800000882,
+          "self_cpu_ms": 3.0772420000753593,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::_to_copy": {
+          "count": 2672,
+          "cpu_ms": 59.877245999933464,
+          "self_cpu_ms": 8.85446699996704,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "cudaMemcpyAsync": {
+          "count": 2800,
+          "cpu_ms": 30.055461000023183,
+          "self_cpu_ms": 30.055461000023183,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        }
+      },
+      "cudaLaunchKernel_per_token": 754.0,
+      "cudaGraphLaunch_per_token": 64.0,
+      "copy_per_token": 339.0,
+      "clone_per_token": 70.0,
+      "to_copy_per_token": 402.0,
+      "launch_cpu_ms_per_token": 6.125031062503394,
+      "copy_clone_cpu_ms_per_token": 6.618680562498337,
+      "decode_ms_per_token": 678.5262451171875
+    },
+    "layer": {
+      "tracked_ops": {
+        "cudaLaunchKernel": {
+          "count": 5312,
+          "cpu_ms": 35.1065620000105,
+          "self_cpu_ms": 35.1065620000105,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "cudaGraphLaunch": {
+          "count": 512,
+          "cpu_ms": 33.95779000001127,
+          "self_cpu_ms": 33.95779000001127,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::copy_": {
+          "count": 2928,
+          "cpu_ms": 66.04673000006984,
+          "self_cpu_ms": 15.787582000090442,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::clone": {
+          "count": 608,
+          "cpu_ms": 13.981925000012863,
+          "self_cpu_ms": 1.8269719999858307,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::to": {
+          "count": 1552,
+          "cpu_ms": 79.37160900000868,
+          "self_cpu_ms": 1.5151199999806066,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::_to_copy": {
+          "count": 1200,
+          "cpu_ms": 77.85648900002808,
+          "self_cpu_ms": 4.627254000009089,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "cudaMemcpyAsync": {
+          "count": 1776,
+          "cpu_ms": 19.628998999979462,
+          "self_cpu_ms": 19.628998999979462,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        }
+      },
+      "cudaLaunchKernel_per_token": 332.0,
+      "cudaGraphLaunch_per_token": 32.0,
+      "copy_per_token": 183.0,
+      "clone_per_token": 38.0,
+      "to_copy_per_token": 172.0,
+      "launch_cpu_ms_per_token": 4.316522000001361,
+      "copy_clone_cpu_ms_per_token": 5.001790937505169,
+      "decode_ms_per_token": 545.2120361328125
+    }
+  },
+  "0.6": {
+    "nograph": {
+      "tracked_ops": {
+        "cudaLaunchKernel": {
+          "count": 17760,
+          "cpu_ms": 107.15541299999947,
+          "self_cpu_ms": 105.66628999999945,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "cudaGraphLaunch": {
+          "count": 0,
+          "cpu_ms": 0.0,
+          "self_cpu_ms": 0.0,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::copy_": {
+          "count": 3184,
+          "cpu_ms": 46.44574500000237,
+          "self_cpu_ms": 19.176824000000583,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::clone": {
+          "count": 0,
+          "cpu_ms": 0.0,
+          "self_cpu_ms": 0.0,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::to": {
+          "count": 3760,
+          "cpu_ms": 63.36201400000423,
+          "self_cpu_ms": 3.1128220000032147,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::_to_copy": {
+          "count": 2672,
+          "cpu_ms": 60.24919200000102,
+          "self_cpu_ms": 9.410787999998435,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "cudaMemcpyAsync": {
+          "count": 528,
+          "cpu_ms": 6.339799000000242,
+          "self_cpu_ms": 6.339799000000242,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        }
+      },
+      "cudaLaunchKernel_per_token": 1110.0,
+      "cudaGraphLaunch_per_token": 0.0,
+      "copy_per_token": 199.0,
+      "clone_per_token": 0.0,
+      "to_copy_per_token": 402.0,
+      "launch_cpu_ms_per_token": 6.697213312499967,
+      "copy_clone_cpu_ms_per_token": 2.902859062500148,
+      "decode_ms_per_token": 76.7131118774414
+    },
+    "split": {
+      "tracked_ops": {
+        "cudaLaunchKernel": {
+          "count": 12192,
+          "cpu_ms": 72.64350599999453,
+          "self_cpu_ms": 72.37314599999513,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "cudaGraphLaunch": {
+          "count": 1024,
+          "cpu_ms": 20.219167000007438,
+          "self_cpu_ms": 20.219167000007438,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::copy_": {
+          "count": 5424,
+          "cpu_ms": 77.57650600002607,
+          "self_cpu_ms": 28.35516700003999,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::clone": {
+          "count": 1120,
+          "cpu_ms": 24.737595999989296,
+          "self_cpu_ms": 3.3735889999915525,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::to": {
+          "count": 3760,
+          "cpu_ms": 59.056692999954755,
+          "self_cpu_ms": 3.0264389999422776,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::_to_copy": {
+          "count": 2672,
+          "cpu_ms": 56.03025400001247,
+          "self_cpu_ms": 8.79620099995863,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "cudaMemcpyAsync": {
+          "count": 2800,
+          "cpu_ms": 30.278875999994042,
+          "self_cpu_ms": 30.278875999994042,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        }
+      },
+      "cudaLaunchKernel_per_token": 762.0,
+      "cudaGraphLaunch_per_token": 64.0,
+      "copy_per_token": 339.0,
+      "clone_per_token": 70.0,
+      "to_copy_per_token": 402.0,
+      "launch_cpu_ms_per_token": 5.803917062500123,
+      "copy_clone_cpu_ms_per_token": 6.3946313750009605,
+      "decode_ms_per_token": 704.2384033203125
+    },
+    "layer": {
+      "tracked_ops": {
+        "cudaLaunchKernel": {
+          "count": 5440,
+          "cpu_ms": 32.39554400002096,
+          "self_cpu_ms": 32.39554400002096,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "cudaGraphLaunch": {
+          "count": 512,
+          "cpu_ms": 26.608302999997278,
+          "self_cpu_ms": 26.35249099999736,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::copy_": {
+          "count": 2928,
+          "cpu_ms": 115.26442799999053,
+          "self_cpu_ms": 15.513968999979813,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::clone": {
+          "count": 608,
+          "cpu_ms": 13.627581000001774,
+          "self_cpu_ms": 1.8032840000146104,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::to": {
+          "count": 1552,
+          "cpu_ms": 133.80525599999572,
+          "self_cpu_ms": 1.4209400000010552,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::_to_copy": {
+          "count": 1200,
+          "cpu_ms": 132.38431599999467,
+          "self_cpu_ms": 4.430853000004951,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "cudaMemcpyAsync": {
+          "count": 1776,
+          "cpu_ms": 18.193175000009873,
+          "self_cpu_ms": 18.193175000009873,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        }
+      },
+      "cudaLaunchKernel_per_token": 340.0,
+      "cudaGraphLaunch_per_token": 32.0,
+      "copy_per_token": 183.0,
+      "clone_per_token": 38.0,
+      "to_copy_per_token": 172.0,
+      "launch_cpu_ms_per_token": 3.68774043750114,
+      "copy_clone_cpu_ms_per_token": 8.055750562499519,
+      "decode_ms_per_token": 329.5223693847656
+    }
+  },
+  "0.7": {
+    "nograph": {
+      "tracked_ops": {
+        "cudaLaunchKernel": {
+          "count": 17760,
+          "cpu_ms": 107.29152700000235,
+          "self_cpu_ms": 106.99030000000239,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "cudaGraphLaunch": {
+          "count": 0,
+          "cpu_ms": 0.0,
+          "self_cpu_ms": 0.0,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::copy_": {
+          "count": 3184,
+          "cpu_ms": 44.50313500000043,
+          "self_cpu_ms": 19.133528999997857,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::clone": {
+          "count": 0,
+          "cpu_ms": 0.0,
+          "self_cpu_ms": 0.0,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::to": {
+          "count": 3760,
+          "cpu_ms": 60.774822000000455,
+          "self_cpu_ms": 2.990808999999736,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::_to_copy": {
+          "count": 2672,
+          "cpu_ms": 57.78401300000072,
+          "self_cpu_ms": 9.119625000000854,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "cudaMemcpyAsync": {
+          "count": 528,
+          "cpu_ms": 6.437202999999718,
+          "self_cpu_ms": 6.437202999999718,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        }
+      },
+      "cudaLaunchKernel_per_token": 1110.0,
+      "cudaGraphLaunch_per_token": 0.0,
+      "copy_per_token": 199.0,
+      "clone_per_token": 0.0,
+      "to_copy_per_token": 402.0,
+      "launch_cpu_ms_per_token": 6.705720437500147,
+      "copy_clone_cpu_ms_per_token": 2.7814459375000267,
+      "decode_ms_per_token": 75.39015197753906
+    },
+    "split": {
+      "tracked_ops": {
+        "cudaLaunchKernel": {
+          "count": 12192,
+          "cpu_ms": 75.43256099991457,
+          "self_cpu_ms": 75.16071799991423,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "cudaGraphLaunch": {
+          "count": 1024,
+          "cpu_ms": 22.17725100003183,
+          "self_cpu_ms": 22.17725100003183,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::copy_": {
+          "count": 5424,
+          "cpu_ms": 79.73922500000297,
+          "self_cpu_ms": 29.100360999996752,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::clone": {
+          "count": 1120,
+          "cpu_ms": 25.491416000003984,
+          "self_cpu_ms": 3.783371000013057,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::to": {
+          "count": 3760,
+          "cpu_ms": 60.339459000017904,
+          "self_cpu_ms": 3.309205000008147,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::_to_copy": {
+          "count": 2672,
+          "cpu_ms": 57.03025400000975,
+          "self_cpu_ms": 9.351668000006827,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "cudaMemcpyAsync": {
+          "count": 2800,
+          "cpu_ms": 31.787681000046977,
+          "self_cpu_ms": 31.787681000046977,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        }
+      },
+      "cudaLaunchKernel_per_token": 762.0,
+      "cudaGraphLaunch_per_token": 64.0,
+      "copy_per_token": 339.0,
+      "clone_per_token": 70.0,
+      "to_copy_per_token": 402.0,
+      "launch_cpu_ms_per_token": 6.10061324999665,
+      "copy_clone_cpu_ms_per_token": 6.576915062500435,
+      "decode_ms_per_token": 1048.14599609375
+    },
+    "layer": {
+      "tracked_ops": {
+        "cudaLaunchKernel": {
+          "count": 5440,
+          "cpu_ms": 32.264204999995606,
+          "self_cpu_ms": 32.264204999995606,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "cudaGraphLaunch": {
+          "count": 512,
+          "cpu_ms": 26.83990200001106,
+          "self_cpu_ms": 26.464648000011337,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::copy_": {
+          "count": 2928,
+          "cpu_ms": 144.78075900002437,
+          "self_cpu_ms": 15.310096000020959,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::clone": {
+          "count": 608,
+          "cpu_ms": 13.657696000005346,
+          "self_cpu_ms": 1.7561169999901984,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::to": {
+          "count": 1552,
+          "cpu_ms": 173.93367100001768,
+          "self_cpu_ms": 1.4267280000255795,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::_to_copy": {
+          "count": 1200,
+          "cpu_ms": 172.50694299999208,
+          "self_cpu_ms": 4.40230199998481,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "cudaMemcpyAsync": {
+          "count": 1776,
+          "cpu_ms": 18.102677000001098,
+          "self_cpu_ms": 18.102677000001098,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        }
+      },
+      "cudaLaunchKernel_per_token": 340.0,
+      "cudaGraphLaunch_per_token": 32.0,
+      "copy_per_token": 183.0,
+      "clone_per_token": 38.0,
+      "to_copy_per_token": 172.0,
+      "launch_cpu_ms_per_token": 3.6940066875004165,
+      "copy_clone_cpu_ms_per_token": 9.902403437501858,
+      "decode_ms_per_token": 330.40057373046875
+    }
+  },
+  "0.8": {
+    "nograph": {
+      "tracked_ops": {
+        "cudaLaunchKernel": {
+          "count": 17760,
+          "cpu_ms": 102.2431540000036,
+          "self_cpu_ms": 102.2431540000036,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "cudaGraphLaunch": {
+          "count": 0,
+          "cpu_ms": 0.0,
+          "self_cpu_ms": 0.0,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::copy_": {
+          "count": 3184,
+          "cpu_ms": 43.70258200000057,
+          "self_cpu_ms": 19.18830400000167,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::clone": {
+          "count": 0,
+          "cpu_ms": 0.0,
+          "self_cpu_ms": 0.0,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::to": {
+          "count": 3760,
+          "cpu_ms": 60.109186,
+          "self_cpu_ms": 2.973317000001278,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::_to_copy": {
+          "count": 2672,
+          "cpu_ms": 57.13586899999873,
+          "self_cpu_ms": 9.117565999996668,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "cudaMemcpyAsync": {
+          "count": 528,
+          "cpu_ms": 6.307678999999329,
+          "self_cpu_ms": 6.307678999999329,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        }
+      },
+      "cudaLaunchKernel_per_token": 1110.0,
+      "cudaGraphLaunch_per_token": 0.0,
+      "copy_per_token": 199.0,
+      "clone_per_token": 0.0,
+      "to_copy_per_token": 402.0,
+      "launch_cpu_ms_per_token": 6.390197125000225,
+      "copy_clone_cpu_ms_per_token": 2.7314113750000355,
+      "decode_ms_per_token": 76.03357696533203
+    },
+    "split": {
+      "tracked_ops": {
+        "cudaLaunchKernel": {
+          "count": 12192,
+          "cpu_ms": 71.92368099995409,
+          "self_cpu_ms": 71.92368099995409,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "cudaGraphLaunch": {
+          "count": 1024,
+          "cpu_ms": 21.065720999980112,
+          "self_cpu_ms": 21.065720999980112,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::copy_": {
+          "count": 5424,
+          "cpu_ms": 80.00498700004471,
+          "self_cpu_ms": 28.424594000073775,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::clone": {
+          "count": 1120,
+          "cpu_ms": 27.189620999996055,
+          "self_cpu_ms": 3.6672719999829195,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::to": {
+          "count": 3760,
+          "cpu_ms": 60.906441999968216,
+          "self_cpu_ms": 3.223882999972836,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::_to_copy": {
+          "count": 2672,
+          "cpu_ms": 57.68255899999538,
+          "self_cpu_ms": 9.76710399995818,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "cudaMemcpyAsync": {
+          "count": 2800,
+          "cpu_ms": 32.156136000008814,
+          "self_cpu_ms": 32.156136000008814,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        }
+      },
+      "cudaLaunchKernel_per_token": 762.0,
+      "cudaGraphLaunch_per_token": 64.0,
+      "copy_per_token": 339.0,
+      "clone_per_token": 70.0,
+      "to_copy_per_token": 402.0,
+      "launch_cpu_ms_per_token": 5.811837624995888,
+      "copy_clone_cpu_ms_per_token": 6.699663000002547,
+      "decode_ms_per_token": 680.3494873046875
+    },
+    "layer": {
+      "tracked_ops": {
+        "cudaLaunchKernel": {
+          "count": 5440,
+          "cpu_ms": 33.1258979999798,
+          "self_cpu_ms": 33.1258979999798,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "cudaGraphLaunch": {
+          "count": 512,
+          "cpu_ms": 31.507732000002754,
+          "self_cpu_ms": 31.507732000002754,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::copy_": {
+          "count": 2928,
+          "cpu_ms": 152.3936120000134,
+          "self_cpu_ms": 15.632478000021397,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::clone": {
+          "count": 608,
+          "cpu_ms": 14.20335100000812,
+          "self_cpu_ms": 1.7868849999920018,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::to": {
+          "count": 1552,
+          "cpu_ms": 165.18343600000784,
+          "self_cpu_ms": 1.4743960000040592,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "aten::_to_copy": {
+          "count": 1200,
+          "cpu_ms": 163.7090400000038,
+          "self_cpu_ms": 4.4727310000132094,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        },
+        "cudaMemcpyAsync": {
+          "count": 1776,
+          "cpu_ms": 19.062332999988524,
+          "self_cpu_ms": 19.062332999988524,
+          "cuda_ms": 0.0,
+          "self_cuda_ms": 0.0
+        }
+      },
+      "cudaLaunchKernel_per_token": 340.0,
+      "cudaGraphLaunch_per_token": 32.0,
+      "copy_per_token": 183.0,
+      "clone_per_token": 38.0,
+      "to_copy_per_token": 172.0,
+      "launch_cpu_ms_per_token": 4.03960187499891,
+      "copy_clone_cpu_ms_per_token": 10.412310187501346,
+      "decode_ms_per_token": 398.8874206542969
+    }
+  }
+}

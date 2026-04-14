@@ -1,0 +1,78 @@
+% LaTeX tables for FlashSVD LowRankArena results.
+% Suggested packages:
+%   \usepackage{booktabs}
+%   \usepackage{threeparttable}
+%   \usepackage{graphicx}
+
+\begin{table}[t]
+\centering
+\small
+\begin{threeparttable}
+\caption{Average FlashSVD speedup on LowRankArena LLaMA-7B checkpoints under a unified serving configuration.}
+\label{tab:flashsvd-lowrankarena-summary}
+\begin{tabular}{lrrrrrr}
+\toprule
+& \multicolumn{3}{c}{Speedup vs Low-Rank Baseline} & \multicolumn{3}{c}{Speedup vs Dense Baseline} \\
+\cmidrule(lr){2-4} \cmidrule(lr){5-7}
+Family & Prefill & Decode & End-to-End & Prefill & Decode & End-to-End \\
+\midrule
+SVD-LLM v1      & 1.55$\times$ & 1.45$\times$ & 1.46$\times$ & 3.07$\times$ & 1.10$\times$ & 1.37$\times$ \\
+SVD-LLM v2      & 1.14$\times$ & 1.50$\times$ & 1.45$\times$ & 4.02$\times$ & 1.14$\times$ & 1.48$\times$ \\
+Basis Sharing   & 0.91$\times$ & 1.49$\times$ & 1.42$\times$ & 4.46$\times$ & 1.14$\times$ & 1.51$\times$ \\
+\midrule
+Overall         & 1.25$\times$ & 1.48$\times$ & 1.44$\times$ & 3.76$\times$ & 1.12$\times$ & 1.45$\times$ \\
+\bottomrule
+\end{tabular}
+\begin{tablenotes}[flushleft]\footnotesize
+\item Dense baseline is \texttt{jeffwan/llama-7b-hf} measured once under the same configuration: prefill $=0.429$\,s, decode $=26.864$\,ms/token, end-to-end $=1.289$\,s.
+\item End-to-end latency is computed as \texttt{prefill\_time\_s + 32 * decode\_ms\_per\_token / 1000}.
+\item All runs use A100 (GPU 4), \texttt{bf16}, batch size $1$, prompt length $512$, decode length $32$, and FlashSVD MLP backend \texttt{dual\_split\_cublas}.
+\end{tablenotes}
+\end{threeparttable}
+\end{table}
+
+\begin{table*}[t]
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{threeparttable}
+\caption{Comprehensive FlashSVD results on LowRankArena LLaMA-7B checkpoints. The low-rank baseline uses the same compressed checkpoint with the baseline runtime from the main table benchmark; the dense baseline uses \texttt{jeffwan/llama-7b-hf}.}
+\label{tab:flashsvd-lowrankarena-comprehensive}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{llrrrrrrrrrr}
+\toprule
+& & \multicolumn{2}{c}{Prefill Time (s)} & \multicolumn{2}{c}{Decode (ms/token)} & \multicolumn{3}{c}{Speedup vs Low-Rank} & \multicolumn{3}{c}{Speedup vs Dense} \\
+\cmidrule(lr){3-4}
+\cmidrule(lr){5-6}
+\cmidrule(lr){7-9}
+\cmidrule(lr){10-12}
+Family & Ratio & Low-Rank & FlashSVD & Low-Rank & FlashSVD & Prefill & Decode & E2E & Prefill & Decode & E2E \\
+\midrule
+\multicolumn{12}{l}{\textbf{SVD-LLM v1}} \\
+SVD-LLM v1 & 0.4 & 0.249 & 0.194 & 35.362 & 26.556 & 1.28$\times$ & 1.33$\times$ & 1.32$\times$ & 2.21$\times$ & 1.01$\times$ & 1.23$\times$ \\
+SVD-LLM v1 & 0.5 & 0.103 & 0.093 & 36.877 & 26.369 & 1.10$\times$ & 1.40$\times$ & 1.37$\times$ & 4.60$\times$ & 1.02$\times$ & 1.38$\times$ \\
+SVD-LLM v1 & 0.6 & 0.212 & 0.197 & 35.569 & 23.176 & 1.07$\times$ & 1.53$\times$ & 1.44$\times$ & 2.17$\times$ & 1.16$\times$ & 1.37$\times$ \\
+SVD-LLM v1 & 0.7 & 0.328 & 0.190 & 34.901 & 22.573 & 1.72$\times$ & 1.55$\times$ & 1.58$\times$ & 2.25$\times$ & 1.19$\times$ & 1.41$\times$ \\
+SVD-LLM v1 & 0.8 & 0.268 & 0.104 & 35.394 & 24.469 & 2.57$\times$ & 1.45$\times$ & 1.58$\times$ & 4.12$\times$ & 1.10$\times$ & 1.45$\times$ \\
+\midrule
+\multicolumn{12}{l}{\textbf{SVD-LLM v2}} \\
+SVD-LLM v2 & 0.4 & 0.071 & 0.072 & 35.408 & 23.332 & 1.00$\times$ & 1.52$\times$ & 1.47$\times$ & 5.99$\times$ & 1.15$\times$ & 1.57$\times$ \\
+SVD-LLM v2 & 0.5 & 0.145 & 0.091 & 35.911 & 24.377 & 1.58$\times$ & 1.47$\times$ & 1.48$\times$ & 4.69$\times$ & 1.10$\times$ & 1.48$\times$ \\
+SVD-LLM v2 & 0.6 & 0.163 & 0.150 & 34.506 & 22.987 & 1.09$\times$ & 1.50$\times$ & 1.43$\times$ & 2.87$\times$ & 1.17$\times$ & 1.46$\times$ \\
+SVD-LLM v2 & 0.7 & 0.180 & 0.174 & 35.526 & 23.231 & 1.04$\times$ & 1.53$\times$ & 1.44$\times$ & 2.47$\times$ & 1.16$\times$ & 1.40$\times$ \\
+SVD-LLM v2 & 0.8 & 0.105 & 0.105 & 34.776 & 23.735 & 1.01$\times$ & 1.47$\times$ & 1.41$\times$ & 4.10$\times$ & 1.13$\times$ & 1.49$\times$ \\
+\midrule
+\multicolumn{12}{l}{\textbf{Basis Sharing}} \\
+Basis Sharing & 0.4 & 0.105 & 0.076 & 34.939 & 23.351 & 1.38$\times$ & 1.50$\times$ & 1.49$\times$ & 5.63$\times$ & 1.15$\times$ & 1.56$\times$ \\
+Basis Sharing & 0.5 & 0.067 & 0.106 & 34.507 & 23.840 & 0.63$\times$ & 1.45$\times$ & 1.35$\times$ & 4.06$\times$ & 1.13$\times$ & 1.48$\times$ \\
+Basis Sharing & 0.6 & 0.084 & 0.116 & 35.426 & 23.337 & 0.73$\times$ & 1.52$\times$ & 1.41$\times$ & 3.70$\times$ & 1.15$\times$ & 1.49$\times$ \\
+\bottomrule
+\end{tabular}
+}
+\begin{tablenotes}[flushleft]\footnotesize
+\item Dense baseline is \texttt{jeffwan/llama-7b-hf} with prefill $=0.429$\,s and decode $=26.864$\,ms/token under the same configuration.
+\item End-to-end speedup is measured on \texttt{prefill + 32-token decode}.
+\item Basis Sharing checkpoints at ratios $0.7$ and $0.8$ are unavailable in \texttt{Duke-CEI-SVD/LowRankArena} and are therefore omitted.
+\end{tablenotes}
+\end{threeparttable}
+\end{table*}

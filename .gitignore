@@ -1,8 +1,14 @@
-models/
-
 # Ignore caches and large artifacts
 __pycache__/
 *.pyc
+.cache/
+checkpoints/**
+!checkpoints/
+!checkpoints/.gitkeep
+!checkpoints/quantized/
+!checkpoints/quantized/.gitkeep
+!checkpoints/dobisvd/
+!checkpoints/dobisvd/.gitkeep
 models/
 ModernBERT/model/
 ModernBERT/out/

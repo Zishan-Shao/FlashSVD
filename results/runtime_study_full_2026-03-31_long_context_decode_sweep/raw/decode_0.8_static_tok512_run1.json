@@ -1,0 +1,20 @@
+{
+  "prompt_len": 512,
+  "new_tokens": 512,
+  "batch_size": 1,
+  "prefill_time_s": 0.09080517408438027,
+  "decode_time_s": 15.147398167056963,
+  "prefill_tok_s": 5638.445222562169,
+  "decode_tok_s": 33.801184490780315,
+  "decode_ms_per_token": 29.58476204503313,
+  "lowrank_cache": false,
+  "flashsvd_dense_cache": false,
+  "baseline_dense_kvcache": false,
+  "total_time_s": 15.238203341141343,
+  "study": "decode_sweep",
+  "ratio": "0.8",
+  "mode": "static",
+  "mode_label": "StaticCache",
+  "config": "tok512",
+  "run_idx": 1
+}

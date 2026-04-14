@@ -1,0 +1,16 @@
+[FlashSVD][dense_decode_auto] Rq/Rk/Rv=1024/1024/1024 split=1024/1024/1024 exact=0.0707 ms packed=0.0614 ms (linear=True) -> packed
+==== FlashSVD Decode Correctness ====
+Config: B=1 prompt_len=11 decode_steps=64 dtype=bf16 graph=1 flash_dense_attn=1 baseline_dense_kvcache=1 reference_dense_attn=0 test_backend=flashsvd_mlp_dual_split_prod prompt_source=text
+baseline full_seq_ce=5.968750 decode_ce=12.312500
+- flash_legacy: full_max_abs=0.5 full_mean_abs=0.0429688 full_rel_linf=0.0208333 full_ce=5.968750 | decode_max_abs=0.53125 decode_mean_abs=0.0507812 decode_rel_linf=0.0274194 decode_ce=12.312500 | greedy_token_match=1.000000
+- flash_test: full_max_abs=0.75 full_mean_abs=0.0493164 full_rel_linf=0.03125 full_ce=5.968750 | decode_max_abs=0.78125 decode_mean_abs=0.0615234 decode_rel_linf=0.0403226 decode_ce=12.312500 | greedy_token_match=1.000000
+Prompt token ids: [512, 263, 5434, 988, 319, 29902, 6757, 6985, 16021, 5925, 29892]
+Greedy token ids:
+- baseline    : [319, 29902, 6757, 526, 1304, 304, 6985, 319, 29902, 6757, 29892, 319, 29902, 6757, 526, 1304, 304, 6985, 319, 29902, 6757, 29892, 319, 29902, 6757, 526, 1304, 304, 6985, 319, 29902, 6757, 29892, 319, 29902, 23985, 526, 1304, 304, 6985, 319, 29902, 23985, 526, 1304, 304, 6985, 319, 29902, 23985, 526, 1304, 304, 6985, 319, 29902, 23985, 526, 1304, 304, 6985, 319, 29902, 319]
+- flash_legacy: [319, 29902, 6757, 526, 1304, 304, 6985, 319, 29902, 6757, 29892, 319, 29902, 6757, 526, 1304, 304, 6985, 319, 29902, 6757, 29892, 319, 29902, 6757, 526, 1304, 304, 6985, 319, 29902, 6757, 29892, 319, 29902, 23985, 526, 1304, 304, 6985, 319, 29902, 23985, 526, 1304, 304, 6985, 319, 29902, 23985, 526, 1304, 304, 6985, 319, 29902, 23985, 526, 1304, 304, 6985, 319, 29902, 319]
+- flash_test  : [319, 29902, 6757, 526, 1304, 304, 6985, 319, 29902, 6757, 29892, 319, 29902, 6757, 526, 1304, 304, 6985, 319, 29902, 6757, 29892, 319, 29902, 6757, 526, 1304, 304, 6985, 319, 29902, 6757, 29892, 319, 29902, 23985, 526, 1304, 304, 6985, 319, 29902, 23985, 526, 1304, 304, 6985, 319, 29902, 23985, 526, 1304, 304, 6985, 319, 29902, 23985, 526, 1304, 304, 6985, 319, 29902, 319]
+Greedy decoded text:
+- prompt       : 'In a future where AI systems assist scientific research,'
+- baseline    : 'AI systems are used to assist AI systems, AI systems are used to assist AI systems, AI systems are used to assist AI systems, AI Systems are used to assist AI Systems are used to assist AI Systems are used to assist AI Systems are used to assist AI A'
+- flash_legacy: 'AI systems are used to assist AI systems, AI systems are used to assist AI systems, AI systems are used to assist AI systems, AI Systems are used to assist AI Systems are used to assist AI Systems are used to assist AI Systems are used to assist AI A'
+- flash_test  : 'AI systems are used to assist AI systems, AI systems are used to assist AI systems, AI systems are used to assist AI systems, AI Systems are used to assist AI Systems are used to assist AI Systems are used to assist AI Systems are used to assist AI A'

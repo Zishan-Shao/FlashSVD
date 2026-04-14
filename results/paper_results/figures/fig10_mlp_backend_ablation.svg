@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="760" viewBox="0 0 1240 760">
+<rect width="1240" height="760" fill="white"/>
+<text x="120.00" y="52.00" font-size="30" fill="#1F2937" font-weight="bold" text-anchor="start" font-family="Helvetica, Arial, sans-serif">MLP Backend Contribution</text>
+<text x="120.00" y="84.00" font-size="16" fill="#4B5563" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Layer-wise mean token latency. The main end-to-end win is not an MLP-only story.</text>
+<line x1="120.00" y1="620.00" x2="1180.00" y2="620.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="625.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">0.00</text>
+<line x1="120.00" y1="520.00" x2="1180.00" y2="520.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="525.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">0.05</text>
+<line x1="120.00" y1="420.00" x2="1180.00" y2="420.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="425.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">0.09</text>
+<line x1="120.00" y1="320.00" x2="1180.00" y2="320.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="325.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">0.14</text>
+<line x1="120.00" y1="220.00" x2="1180.00" y2="220.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="225.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">0.19</text>
+<line x1="120.00" y1="120.00" x2="1180.00" y2="120.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="125.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">0.23</text>
+<line x1="120.00" y1="120.00" x2="120.00" y2="620.00" stroke="#2D3748" stroke-width="2"/>
+<line x1="120.00" y1="620.00" x2="1180.00" y2="620.00" stroke="#2D3748" stroke-width="2"/>
+<text x="28.00" y="370.00" font-size="16" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" transform="rotate(-90.00 28.00 370.00)">mean ms</text>
+<rect x="194.20" y="185.22" width="373.60" height="434.78" fill="#E67E22" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="381.00" y="175.22" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">0.20</text>
+<text x="385.00" y="654.00" font-size="15" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">Baseline eager</text>
+<rect x="724.20" y="187.88" width="373.60" height="432.12" fill="#E67E22" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="911.00" y="177.88" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">0.20</text>
+<text x="915.00" y="654.00" font-size="15" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">Prod graph</text>
+<rect x="940.00" y="26.00" width="18.00" height="18.00" fill="#E67E22" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<text x="968.00" y="40.00" font-size="14" fill="#1F2937" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Latency</text>
+</svg>

@@ -1,0 +1,20 @@
+{
+  "prompt_len": 4096,
+  "new_tokens": 128,
+  "batch_size": 1,
+  "prefill_time_s": 0.8786620448809117,
+  "decode_time_s": 3.294165066909045,
+  "prefill_tok_s": 4661.633017908661,
+  "decode_tok_s": 38.856583504512706,
+  "decode_ms_per_token": 25.735664585226914,
+  "lowrank_cache": false,
+  "flashsvd_dense_cache": false,
+  "baseline_dense_kvcache": true,
+  "total_time_s": 4.172827111789957,
+  "study": "stage",
+  "ratio": "0.6",
+  "mode": "densekv",
+  "mode_label": "DenseKVCacheBaseline",
+  "config": "ctx4096",
+  "run_idx": 1
+}

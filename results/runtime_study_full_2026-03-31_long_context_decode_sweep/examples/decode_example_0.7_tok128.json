@@ -1,0 +1,10 @@
+{
+  "prompt": "Reducing kernel launch overhead helps autoregressive decoding because",
+  "prompt_token_len": 14,
+  "new_tokens": 128,
+  "generated_text": "it allows the GPU to do more work per-frame.\n\nComment: I'm not sure what you mean by \"the GPU can do more work per-frame\". I'm not an expert in CUDA, but I think the GPU is doing the same work as the CPU is doing.\n\nComment: @MattW18 I'm not sure either. I'm not an expert either. I'm just saying that the GPU can do more work per-frame than the CPU can do.\n\nComment: @MattW18 I'm not sure either. I'",
+  "generated_characters": 399,
+  "ratio": "0.7",
+  "mode": "flashsvd",
+  "mode_label": "FlashSVD-v1.5"
+}

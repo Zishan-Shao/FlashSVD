@@ -1,0 +1,12 @@
+==== Decode KV-cache comparison ====
+Setup: llama=llama2-7b | Bs=1 | Ls=512,2048,4096 | H=32 Hk=32 rep=1 Dh=128 | layout=shared | R=1024 | dtype=bf16 | backend=fa2 | cuda_graph_variants=1 | causal=1
+Rank: total_effective=1024, total_target=1024 | policy=auto(layout=shared, formula=global, target_ratio=0.500, raw_shared=1024.00, rounded_shared=1024)
+Params/layer: dense=33,554,432 | lowrank_global_ref=16,777,216
+Columns: L | direct_winner | winner_ms | FlashSVD-v1.5 | sparse | sparse+FA2-only | dense+FA2-only | sparse/FlashSVD | fail
+  512 | FlashSVD-v1.5+graph |    0.1016 |         0.1016 |  4.3270 |           0.4389 |          0.2075 |          42.58x | sparse(v1.6-v2-res):workspace_mismatch, sparse(v1.6-v2-nres):workspace_mismatch
+ 2048 | FlashSVD-v1.5+graph |    0.1183 |         0.1183 |  7.9756 |           0.4509 |          0.2137 |          67.39x | sparse(v1.6-v2-res):workspace_mismatch, sparse(v1.6-v2-nres):workspace_mismatch
+ 4096 | FlashSVD-v1.5+graph |    0.1390 |         0.1390 | 13.4465 |           0.7313 |          0.2114 |          96.76x | sparse(v1.6-v2-res):workspace_mismatch, sparse(v1.6-v2-nres):workspace_mismatch
+Step winner counts (full online step): FlashSVD-v1.5+graph=3
+Overall winner counts (including reconstruct-ablation lower bound): dense+FA2-only+graph=3
+Overall (including reconstruct-ablation lower bound): no low-rank online variant wins.
+Failure counts: sparse(v1.6-v2-nres)=3, sparse(v1.6-v2-res)=3

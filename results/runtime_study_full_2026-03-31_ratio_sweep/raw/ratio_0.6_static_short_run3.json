@@ -1,0 +1,19 @@
+{
+  "ratio": "0.6",
+  "mode": "static",
+  "baseline_label": "StaticCache",
+  "config": "short",
+  "prompt_len": 512,
+  "new_tokens": 32,
+  "run": 3,
+  "batch_size": 1,
+  "prefill_time_s": 0.13374000997282565,
+  "decode_time_s": 0.9504332751967013,
+  "prefill_tok_s": 3828.323327507095,
+  "decode_tok_s": 33.668854863459295,
+  "decode_ms_per_token": 29.701039849896915,
+  "lowrank_cache": false,
+  "flashsvd_dense_cache": false,
+  "baseline_dense_kvcache": false,
+  "total_time_s": 1.084173285169527
+}

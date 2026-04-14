@@ -1,0 +1,5 @@
+label,total_ms,attn_ms,mlp_ms,ln_ms,other_ms
+StaticCache,37.014,16.53,6.109,7.489,6.537
+DenseKV,40.893,20.188,6.399,7.974,5.983
+"FlashSVD
+no-graph",36.098,15.137,7.584,7.252,5.774

@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="780" viewBox="0 0 1280 780">
+<rect width="1280" height="780" fill="white"/>
+<text x="120.00" y="52.00" font-size="30" fill="#1F2937" font-weight="bold" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Stage Breakdown: Prefill and Decode</text>
+<text x="120.00" y="84.00" font-size="16" fill="#4B5563" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Median stage times. Each bar is a full-model run, split into prefill and decode stages.</text>
+<line x1="120.00" y1="630.00" x2="1200.00" y2="630.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="635.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">0.00</text>
+<line x1="120.00" y1="528.00" x2="1200.00" y2="528.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="533.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">1.12</text>
+<line x1="120.00" y1="426.00" x2="1200.00" y2="426.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="431.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">2.24</text>
+<line x1="120.00" y1="324.00" x2="1200.00" y2="324.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="329.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">3.36</text>
+<line x1="120.00" y1="222.00" x2="1200.00" y2="222.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="227.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">4.47</text>
+<line x1="120.00" y1="120.00" x2="1200.00" y2="120.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="125.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">5.59</text>
+<line x1="120.00" y1="120.00" x2="120.00" y2="630.00" stroke="#2D3748" stroke-width="2"/>
+<line x1="120.00" y1="630.00" x2="1200.00" y2="630.00" stroke="#2D3748" stroke-width="2"/>
+<text x="30.00" y="375.00" font-size="16" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" transform="rotate(-90.00 30.00 375.00)">time (s)</text>
+<rect x="160.50" y="588.78" width="84.50" height="41.22" fill="#F4A261" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<rect x="160.50" y="501.77" width="84.50" height="87.01" fill="#2A9D8F" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<text x="202.75" y="652.00" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">Baseline</text>
+<text x="202.75" y="491.77" font-size="12" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">1.41</text>
+<rect x="255.00" y="622.80" width="84.50" height="7.20" fill="#F4A261" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<rect x="255.00" y="593.70" width="84.50" height="29.09" fill="#2A9D8F" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<text x="297.25" y="652.00" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">FlashSVD</text>
+<text x="297.25" y="583.70" font-size="12" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">0.40</text>
+<text x="255.00" y="679.00" font-size="15" fill="#1F2937" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">StaticCache</text>
+<text x="255.00" y="697.00" font-size="15" fill="#1F2937" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">512 / 32</text>
+<text x="255.00" y="722.00" font-size="13" fill="#0F766E" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">3.51x total</text>
+<rect x="430.50" y="577.29" width="84.50" height="52.71" fill="#F4A261" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<rect x="430.50" y="227.07" width="84.50" height="350.21" fill="#2A9D8F" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<text x="472.75" y="652.00" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">Baseline</text>
+<text x="472.75" y="217.07" font-size="12" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">4.42</text>
+<rect x="525.00" y="616.14" width="84.50" height="13.86" fill="#F4A261" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<rect x="525.00" y="498.31" width="84.50" height="117.83" fill="#2A9D8F" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<text x="567.25" y="652.00" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">FlashSVD</text>
+<text x="567.25" y="488.31" font-size="12" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">1.44</text>
+<text x="525.00" y="679.00" font-size="15" fill="#1F2937" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">StaticCache</text>
+<text x="525.00" y="697.00" font-size="15" fill="#1F2937" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">2048 / 128</text>
+<text x="525.00" y="722.00" font-size="13" fill="#0F766E" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">3.03x total</text>
+<rect x="700.50" y="591.33" width="84.50" height="38.67" fill="#F4A261" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<rect x="700.50" y="495.66" width="84.50" height="95.67" fill="#2A9D8F" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<text x="742.75" y="652.00" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">Baseline</text>
+<text x="742.75" y="485.66" font-size="12" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">1.47</text>
+<rect x="795.00" y="623.98" width="84.50" height="6.02" fill="#F4A261" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<rect x="795.00" y="594.71" width="84.50" height="29.28" fill="#2A9D8F" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<text x="837.25" y="652.00" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">FlashSVD</text>
+<text x="837.25" y="584.71" font-size="12" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">0.39</text>
+<text x="795.00" y="679.00" font-size="15" fill="#1F2937" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">DenseKVCacheBaseline</text>
+<text x="795.00" y="697.00" font-size="15" fill="#1F2937" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">512 / 32</text>
+<text x="795.00" y="722.00" font-size="13" fill="#0F766E" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">3.82x total</text>
+<rect x="970.50" y="580.39" width="84.50" height="49.61" fill="#F4A261" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<rect x="970.50" y="197.80" width="84.50" height="382.59" fill="#2A9D8F" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<text x="1012.75" y="652.00" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">Baseline</text>
+<text x="1012.75" y="187.80" font-size="12" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">4.74</text>
+<rect x="1065.00" y="616.59" width="84.50" height="13.41" fill="#F4A261" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<rect x="1065.00" y="497.67" width="84.50" height="118.93" fill="#2A9D8F" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<text x="1107.25" y="652.00" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">FlashSVD</text>
+<text x="1107.25" y="487.67" font-size="12" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">1.45</text>
+<text x="1065.00" y="679.00" font-size="15" fill="#1F2937" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">DenseKVCacheBaseline</text>
+<text x="1065.00" y="697.00" font-size="15" fill="#1F2937" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">2048 / 128</text>
+<text x="1065.00" y="722.00" font-size="13" fill="#0F766E" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">3.26x total</text>
+<rect x="960.00" y="26.00" width="18.00" height="18.00" fill="#F4A261" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<text x="988.00" y="40.00" font-size="14" fill="#1F2937" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Prefill</text>
+<rect x="960.00" y="52.00" width="18.00" height="18.00" fill="#2A9D8F" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<text x="988.00" y="66.00" font-size="14" fill="#1F2937" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Decode</text>
+</svg>

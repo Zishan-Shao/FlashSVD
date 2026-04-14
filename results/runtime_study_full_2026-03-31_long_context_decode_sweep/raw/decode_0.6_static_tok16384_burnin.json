@@ -1,0 +1,14 @@
+{
+  "prompt_len": 512,
+  "new_tokens": 16384,
+  "batch_size": 1,
+  "prefill_time_s": 0.2131236989516765,
+  "decode_time_s": 754.7458002329804,
+  "prefill_tok_s": 2402.3607065683036,
+  "decode_tok_s": 21.707971074423295,
+  "decode_ms_per_token": 46.066027846251245,
+  "lowrank_cache": false,
+  "flashsvd_dense_cache": false,
+  "baseline_dense_kvcache": false,
+  "total_time_s": 754.9589239319321
+}

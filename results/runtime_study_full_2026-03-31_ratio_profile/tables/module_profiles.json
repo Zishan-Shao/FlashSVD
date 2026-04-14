@@ -1,0 +1,94 @@
+{
+  "0.5": {
+    "static": {
+      "total_forward_ms": 44.088,
+      "buckets": {},
+      "prefill_time_s": 0.05893704015761614,
+      "decode_ms_per_token": 36.34390934894327,
+      "profile_steps": 16
+    },
+    "densekv": {
+      "total_forward_ms": 38.459,
+      "buckets": {},
+      "prefill_time_s": 0.05740385502576828,
+      "decode_ms_per_token": 31.723404441436287,
+      "profile_steps": 16
+    },
+    "flashsvd": {
+      "total_forward_ms": 11.562,
+      "buckets": {},
+      "prefill_time_s": 0.9898442679550499,
+      "decode_ms_per_token": 11.98471974930726,
+      "profile_steps": 16
+    }
+  },
+  "0.6": {
+    "static": {
+      "total_forward_ms": 43.874,
+      "buckets": {},
+      "prefill_time_s": 0.16402063588611782,
+      "decode_ms_per_token": 36.70154225255828,
+      "profile_steps": 16
+    },
+    "densekv": {
+      "total_forward_ms": 37.641,
+      "buckets": {},
+      "prefill_time_s": 0.15818956680595875,
+      "decode_ms_per_token": 30.987225844000932,
+      "profile_steps": 16
+    },
+    "flashsvd": {
+      "total_forward_ms": 14.043,
+      "buckets": {},
+      "prefill_time_s": 0.15285527799278498,
+      "decode_ms_per_token": 14.513329217152204,
+      "profile_steps": 16
+    }
+  },
+  "0.7": {
+    "static": {
+      "total_forward_ms": 43.815,
+      "buckets": {},
+      "prefill_time_s": 0.1838103150948882,
+      "decode_ms_per_token": 36.19395022542449,
+      "profile_steps": 16
+    },
+    "densekv": {
+      "total_forward_ms": 38.07,
+      "buckets": {},
+      "prefill_time_s": 0.1823489130474627,
+      "decode_ms_per_token": 30.660685311886482,
+      "profile_steps": 16
+    },
+    "flashsvd": {
+      "total_forward_ms": 15.85,
+      "buckets": {},
+      "prefill_time_s": 0.17127502500079572,
+      "decode_ms_per_token": 16.51653474982595,
+      "profile_steps": 16
+    }
+  },
+  "0.8": {
+    "static": {
+      "total_forward_ms": 45.261,
+      "buckets": {},
+      "prefill_time_s": 0.10703120590187609,
+      "decode_ms_per_token": 37.134759782929905,
+      "profile_steps": 16
+    },
+    "densekv": {
+      "total_forward_ms": 37.39,
+      "buckets": {},
+      "prefill_time_s": 0.10505977203138173,
+      "decode_ms_per_token": 30.554149627278093,
+      "profile_steps": 16
+    },
+    "flashsvd": {
+      "total_forward_ms": 17.574,
+      "buckets": {},
+      "prefill_time_s": 0.10150666488334537,
+      "decode_ms_per_token": 17.95663475058973,
+      "profile_steps": 16
+    }
+  }
+}

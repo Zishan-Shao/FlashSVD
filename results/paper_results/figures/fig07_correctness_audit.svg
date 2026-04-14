@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="760" viewBox="0 0 1240 760">
+<rect width="1240" height="760" fill="white"/>
+<text x="120.00" y="52.00" font-size="30" fill="#1F2937" font-weight="bold" text-anchor="start" font-family="Helvetica, Arial, sans-serif">Correctness Audit Against fp32 No-Cache Gold</text>
+<text x="120.00" y="84.00" font-size="16" fill="#4B5563" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">All cached bf16 systems drift on some prompts; FlashSVD-v1.5 is not worse than the baselines.</text>
+<line x1="120.00" y1="620.00" x2="1180.00" y2="620.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="625.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">0.00</text>
+<line x1="120.00" y1="520.00" x2="1180.00" y2="520.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="525.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">0.21</text>
+<line x1="120.00" y1="420.00" x2="1180.00" y2="420.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="425.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">0.42</text>
+<line x1="120.00" y1="320.00" x2="1180.00" y2="320.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="325.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">0.63</text>
+<line x1="120.00" y1="220.00" x2="1180.00" y2="220.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="225.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">0.84</text>
+<line x1="120.00" y1="120.00" x2="1180.00" y2="120.00" stroke="#D9DEE7" stroke-width="1"/>
+<text x="108.00" y="125.00" font-size="14" fill="#6B7280" font-weight="normal" text-anchor="end" font-family="Helvetica, Arial, sans-serif">1.05</text>
+<line x1="120.00" y1="120.00" x2="120.00" y2="620.00" stroke="#2D3748" stroke-width="2"/>
+<line x1="120.00" y1="620.00" x2="1180.00" y2="620.00" stroke="#2D3748" stroke-width="2"/>
+<text x="28.00" y="370.00" font-size="16" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" transform="rotate(-90.00 28.00 370.00)">rate</text>
+<rect x="169.47" y="334.29" width="76.80" height="285.71" fill="#5B6577" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="207.87" y="324.29" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">0.60</text>
+<rect x="254.27" y="334.29" width="76.80" height="285.71" fill="#8C6E5C" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="292.67" y="324.29" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">0.60</text>
+<rect x="339.07" y="334.29" width="76.80" height="285.71" fill="#007F73" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="377.47" y="324.29" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">0.60</text>
+<text x="296.67" y="654.00" font-size="15" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">Exact match</text>
+<rect x="522.80" y="294.85" width="76.80" height="325.15" fill="#5B6577" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="561.20" y="284.85" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">0.68</text>
+<rect x="607.60" y="313.45" width="76.80" height="306.55" fill="#8C6E5C" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="646.00" y="303.45" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">0.64</text>
+<rect x="692.40" y="282.57" width="76.80" height="337.43" fill="#007F73" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="730.80" y="272.57" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">0.71</text>
+<text x="650.00" y="654.00" font-size="15" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">Mean token match</text>
+<rect x="876.13" y="143.81" width="76.80" height="476.19" fill="#5B6577" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="914.53" y="133.81" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">1.00</text>
+<rect x="960.93" y="191.43" width="76.80" height="428.57" fill="#8C6E5C" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="999.33" y="181.43" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">0.90</text>
+<rect x="1045.73" y="143.81" width="76.80" height="476.19" fill="#007F73" stroke="none" stroke-width="1" rx="4" opacity="1.0"/>
+<text x="1084.13" y="133.81" font-size="13" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">1.00</text>
+<text x="1003.33" y="654.00" font-size="15" fill="#1F2937" font-weight="normal" text-anchor="middle" font-family="Helvetica, Arial, sans-serif">First-token match</text>
+<rect x="940.00" y="26.00" width="18.00" height="18.00" fill="#5B6577" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<text x="968.00" y="40.00" font-size="14" fill="#1F2937" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">StaticCache bf16</text>
+<rect x="940.00" y="52.00" width="18.00" height="18.00" fill="#8C6E5C" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<text x="968.00" y="66.00" font-size="14" fill="#1F2937" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">DenseKV bf16</text>
+<rect x="940.00" y="78.00" width="18.00" height="18.00" fill="#007F73" stroke="none" stroke-width="1" rx="3" opacity="1.0"/>
+<text x="968.00" y="92.00" font-size="14" fill="#1F2937" font-weight="normal" text-anchor="start" font-family="Helvetica, Arial, sans-serif">FlashSVD-v1.5 bf16</text>
+</svg>

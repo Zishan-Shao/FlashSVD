@@ -1,0 +1,50 @@
+==== FlashSVD vs SVD Decode Benchmark ====
+Config: prompt_len=512 new_tokens=1024 warmup=3 batch=1 dtype=bf16 device=cuda ffn_backend=flashsvd_mlp_dual_split_prod mlp_cuda_graph=1 scope=layer_tail baseline_dense_kvcache=0 cutlass_ropeattn=0
+
+[Low-Rank baseline]
+Traceback (most recent call last):
+  File "/home/zs89/FlashSVD/FlashSVD-v1.5/benchmark/decode/bench_flashsvd_vs_svd_decode.py", line 290, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "/home/zs89/FlashSVD/FlashSVD-v1.5/benchmark/decode/bench_flashsvd_vs_svd_decode.py", line 232, in main
+    results["svd"] = _bench_one_mode(
+                     ~~~~~~~~~~~~~~~^
+        mode="svd",
+        ^^^^^^^^^^^
+    ...<15 lines>...
+        enable_baseline_dense_kvcache=bool(args.baseline_dense_kvcache),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/zs89/FlashSVD/FlashSVD-v1.5/benchmark/decode/bench_flashsvd_vs_svd_decode.py", line 157, in _bench_one_mode
+    model = model.to(device)
+  File "/home/zs89/miniconda3/lib/python3.13/site-packages/transformers/modeling_utils.py", line 4106, in to
+    return super().to(*args, **kwargs)
+           ~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/zs89/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1355, in to
+    return self._apply(convert)
+           ~~~~~~~~~~~^^^^^^^^^
+  File "/home/zs89/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 915, in _apply
+    module._apply(fn)
+    ~~~~~~~~~~~~~^^^^
+  File "/home/zs89/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 915, in _apply
+    module._apply(fn)
+    ~~~~~~~~~~~~~^^^^
+  File "/home/zs89/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 942, in _apply
+    param_applied = fn(param)
+  File "/home/zs89/miniconda3/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1341, in convert
+    return t.to(
+           ~~~~^
+        device,
+        ^^^^^^^
+        dtype if t.is_floating_point() or t.is_complex() else None,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        non_blocking,
+        ^^^^^^^^^^^^^
+    )
+    ^
+RuntimeError: CUDA error: CUDA-capable device(s) is/are busy or unavailable
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+

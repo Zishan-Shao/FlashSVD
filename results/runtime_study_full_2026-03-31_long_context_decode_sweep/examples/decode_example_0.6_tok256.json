@@ -1,0 +1,10 @@
+{
+  "prompt": "Reducing kernel launch overhead helps autoregressive decoding because",
+  "prompt_token_len": 14,
+  "new_tokens": 256,
+  "generated_text": "it reduces the number of\n * frames of the of the intermediate-deoder-raw+nulstramem*n*f.\n *\n * 2. Reducing kernel launch overhead helps autodec_of_n_jobs_for_f\n * You can't autodual_dec_of_n_jobs_for_f because it is not autodeamod_of_n_jobs_for_f\n *\n * 3. Reducing kernel launch overhead helps autodec_of_n_jobs_for_f\n * You can't autodec_of_n_jobs_for_f because it is not autodec_of_n_jobs_for_f\n *\n * 4. Reducing kernel launch overhead helps autodec_of_n_jobs_for_f\n * You can't autodec_of_n_jobs_for_f because it is not autodec_of_n_jobs_for_f\n *\n * 5. Reducing kernel launch overhead helps autodec_of_n_jobs_for",
+  "generated_characters": 615,
+  "ratio": "0.6",
+  "mode": "flashsvd",
+  "mode_label": "FlashSVD-v1.5"
+}

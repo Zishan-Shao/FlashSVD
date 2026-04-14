@@ -1,0 +1,26 @@
+==== FlashSVD vs SVD Decode Benchmark ====
+Config: prompt_len=256 new_tokens=16 warmup=3 batch=1 dtype=bf16 device=cuda:0 ffn_backend=flashsvd_mlp_dual_split_prod mlp_cuda_graph=1 scope=layer_tail baseline_dense_kvcache=0 cutlass_ropeattn=0
+
+[Low-Rank baseline]
+[FlashSVD] Downloading HF export into local cache.
+Fetching 9 files:   0%|          | 0/9 [00:00<?, ?it/s]Fetching 9 files:  11%|█         | 1/9 [00:00<00:03,  2.55it/s]Fetching 9 files:  44%|████▍     | 4/9 [00:09<00:12,  2.40s/it]Fetching 9 files: 100%|██████████| 9/9 [00:09<00:00,  1.00s/it]
+/home/zs89/miniconda3/envs/flashsvdv15/lib/python3.13/site-packages/transformers/utils/hub.py:110: FutureWarning: Using `TRANSFORMERS_CACHE` is deprecated and will be removed in v5 of Transformers. Use `HF_HOME` instead.
+  warnings.warn(
+`torch_dtype` is deprecated! Use `dtype` instead!
+Skipping import of cpp extensions due to incompatible torch version 2.9.1+cu128 for torchao version 0.16.0             Please see https://github.com/pytorch/ao/issues/2919 for more info
+[StaticCache] H=32 Hk=32 REP=1 Dh=128 R=1638 max_cache_len=276 (REP=1, non-GQA)
+=== KV-Cache Prefill/Decode Benchmark ===
+Prefill: prompt_len=256 | time 0.202s | 1,269 tok/s
+Decode : new_tokens=16 | time 0.513s | 32.079 ms/token | 31 tok/s
+
+[FlashSVD]
+[FlashSVD] Reusing cached HF export from local cache.
+[FlashSVD-v1.5] H=32 Hk=32 REP=1 Dh=128 R=1638 max_cache_len=276 (REP=1, non-GQA)
+=== KV-Cache Prefill/Decode Benchmark ===
+Prefill: prompt_len=256 | time 0.061s | 4,194 tok/s
+Decode : new_tokens=16 | time 0.207s | 12.938 ms/token | 77 tok/s
+
+---- Summary ----
+SVD decode: 32.079 ms/token | 31 tok/s
+FlashSVD decode: 12.938 ms/token | 77 tok/s
+FlashSVD speedup vs SVD: 2.48x

@@ -1,0 +1,20 @@
+[FlashSVD-v1.5] H=32 Hk=32 REP=1 Dh=128 R=2457 max_cache_len=564 (REP=1, non-GQA)
+=== KV-Cache Prefill/Decode Benchmark ===
+Prefill: prompt_len=512 | time 0.153s | 3,350 tok/s
+Decode : new_tokens=32 | time 0.464s | 14.513 ms/token | 69 tok/s
+
+=== Decode Profile (module CUDA time) ===
+Avg over 16 steps @ seq≈547 | total_forward 14.043 ms/token
+  lm_head     :    0.165 ms (  1.2%)
+  embed_tokens:    0.054 ms (  0.4%)
+  final_norm  :    0.031 ms (  0.2%)
+  attn_total  :    0.000 ms (  0.0%)
+  mlp_total   :    0.000 ms (  0.0%)
+  ln1_total   :    0.000 ms (  0.0%)
+  ln2_total   :    0.000 ms (  0.0%)
+  other       :   13.793 ms ( 98.2%)
+Top 3/10 modules:
+  lm_head         :    0.165 ms (  1.2%)
+  embed_tokens    :    0.054 ms (  0.4%)
+  final_norm      :    0.031 ms (  0.2%)
+

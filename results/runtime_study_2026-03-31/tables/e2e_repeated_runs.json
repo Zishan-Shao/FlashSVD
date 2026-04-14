@@ -1,0 +1,622 @@
+[
+  {
+    "file": "e2e_densekv_vs_flashsvd_long_run1.log",
+    "pair_type": "densekv_vs_flashsvd",
+    "config": "long",
+    "run": 1,
+    "reported_speedup": 3.15,
+    "svd": {
+      "tag": "[DenseKVCacheBaseline] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=2180 (REP=1, non-GQA)",
+      "prompt_len": 2048,
+      "prefill_time_s": 0.544,
+      "prefill_tok_s": 3763.0,
+      "new_tokens": 128,
+      "decode_time_s": 4.093,
+      "decode_ms_per_token": 31.979,
+      "decode_tok_s": 31.0,
+      "total_time_s": 4.6370000000000005
+    },
+    "flashsvd": {
+      "tag": "[FlashSVD-v1.5] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=2180 (REP=1, non-GQA)",
+      "prompt_len": 2048,
+      "prefill_time_s": 0.146,
+      "prefill_tok_s": 14028.0,
+      "new_tokens": 128,
+      "decode_time_s": 1.3,
+      "decode_ms_per_token": 10.158,
+      "decode_tok_s": 98.0,
+      "total_time_s": 1.446
+    },
+    "computed_speedup_decode": 3.1481590864343376,
+    "computed_speedup_total": 3.2067773167358236
+  },
+  {
+    "file": "e2e_densekv_vs_flashsvd_long_run2.log",
+    "pair_type": "densekv_vs_flashsvd",
+    "config": "long",
+    "run": 2,
+    "reported_speedup": 3.22,
+    "svd": {
+      "tag": "[DenseKVCacheBaseline] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=2180 (REP=1, non-GQA)",
+      "prompt_len": 2048,
+      "prefill_time_s": 0.532,
+      "prefill_tok_s": 3852.0,
+      "new_tokens": 128,
+      "decode_time_s": 4.195,
+      "decode_ms_per_token": 32.771,
+      "decode_tok_s": 31.0,
+      "total_time_s": 4.727
+    },
+    "flashsvd": {
+      "tag": "[FlashSVD-v1.5] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=2180 (REP=1, non-GQA)",
+      "prompt_len": 2048,
+      "prefill_time_s": 0.147,
+      "prefill_tok_s": 13919.0,
+      "new_tokens": 128,
+      "decode_time_s": 1.304,
+      "decode_ms_per_token": 10.189,
+      "decode_tok_s": 98.0,
+      "total_time_s": 1.451
+    },
+    "computed_speedup_decode": 3.216311708705467,
+    "computed_speedup_total": 3.257753273604411
+  },
+  {
+    "file": "e2e_densekv_vs_flashsvd_long_run3.log",
+    "pair_type": "densekv_vs_flashsvd",
+    "config": "long",
+    "run": 3,
+    "reported_speedup": 3.4,
+    "svd": {
+      "tag": "[DenseKVCacheBaseline] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=2180 (REP=1, non-GQA)",
+      "prompt_len": 2048,
+      "prefill_time_s": 0.553,
+      "prefill_tok_s": 3704.0,
+      "new_tokens": 128,
+      "decode_time_s": 4.394,
+      "decode_ms_per_token": 34.329,
+      "decode_tok_s": 29.0,
+      "total_time_s": 4.947
+    },
+    "flashsvd": {
+      "tag": "[FlashSVD-v1.5] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=2180 (REP=1, non-GQA)",
+      "prompt_len": 2048,
+      "prefill_time_s": 0.147,
+      "prefill_tok_s": 13957.0,
+      "new_tokens": 128,
+      "decode_time_s": 1.293,
+      "decode_ms_per_token": 10.098,
+      "decode_tok_s": 99.0,
+      "total_time_s": 1.44
+    },
+    "computed_speedup_decode": 3.3995840760546643,
+    "computed_speedup_total": 3.435416666666667
+  },
+  {
+    "file": "e2e_densekv_vs_flashsvd_long_run4.log",
+    "pair_type": "densekv_vs_flashsvd",
+    "config": "long",
+    "run": 4,
+    "reported_speedup": 4.18,
+    "svd": {
+      "tag": "[DenseKVCacheBaseline] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=2180 (REP=1, non-GQA)",
+      "prompt_len": 2048,
+      "prefill_time_s": 0.584,
+      "prefill_tok_s": 3505.0,
+      "new_tokens": 128,
+      "decode_time_s": 5.465,
+      "decode_ms_per_token": 42.696,
+      "decode_tok_s": 23.0,
+      "total_time_s": 6.0489999999999995
+    },
+    "flashsvd": {
+      "tag": "[FlashSVD-v1.5] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=2180 (REP=1, non-GQA)",
+      "prompt_len": 2048,
+      "prefill_time_s": 0.147,
+      "prefill_tok_s": 13945.0,
+      "new_tokens": 128,
+      "decode_time_s": 1.308,
+      "decode_ms_per_token": 10.216,
+      "decode_tok_s": 98.0,
+      "total_time_s": 1.455
+    },
+    "computed_speedup_decode": 4.179326546593579,
+    "computed_speedup_total": 4.157388316151202
+  },
+  {
+    "file": "e2e_densekv_vs_flashsvd_long_run5.log",
+    "pair_type": "densekv_vs_flashsvd",
+    "config": "long",
+    "run": 5,
+    "reported_speedup": 3.13,
+    "svd": {
+      "tag": "[DenseKVCacheBaseline] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=2180 (REP=1, non-GQA)",
+      "prompt_len": 2048,
+      "prefill_time_s": 0.541,
+      "prefill_tok_s": 3789.0,
+      "new_tokens": 128,
+      "decode_time_s": 4.187,
+      "decode_ms_per_token": 32.713,
+      "decode_tok_s": 31.0,
+      "total_time_s": 4.728000000000001
+    },
+    "flashsvd": {
+      "tag": "[FlashSVD-v1.5] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=2180 (REP=1, non-GQA)",
+      "prompt_len": 2048,
+      "prefill_time_s": 0.146,
+      "prefill_tok_s": 14015.0,
+      "new_tokens": 128,
+      "decode_time_s": 1.337,
+      "decode_ms_per_token": 10.443,
+      "decode_tok_s": 96.0,
+      "total_time_s": 1.4829999999999999
+    },
+    "computed_speedup_decode": 3.1325289667720004,
+    "computed_speedup_total": 3.188132164531356
+  },
+  {
+    "file": "e2e_densekv_vs_flashsvd_short_run1.log",
+    "pair_type": "densekv_vs_flashsvd",
+    "config": "short",
+    "run": 1,
+    "reported_speedup": 3.17,
+    "svd": {
+      "tag": "[DenseKVCacheBaseline] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=548 (REP=1, non-GQA)",
+      "prompt_len": 512,
+      "prefill_time_s": 0.413,
+      "prefill_tok_s": 1238.0,
+      "new_tokens": 32,
+      "decode_time_s": 1.04,
+      "decode_ms_per_token": 32.495,
+      "decode_tok_s": 31.0,
+      "total_time_s": 1.453
+    },
+    "flashsvd": {
+      "tag": "[FlashSVD-v1.5] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=548 (REP=1, non-GQA)",
+      "prompt_len": 512,
+      "prefill_time_s": 0.077,
+      "prefill_tok_s": 6678.0,
+      "new_tokens": 32,
+      "decode_time_s": 0.328,
+      "decode_ms_per_token": 10.263,
+      "decode_tok_s": 97.0,
+      "total_time_s": 0.405
+    },
+    "computed_speedup_decode": 3.166228198382539,
+    "computed_speedup_total": 3.5876543209876544
+  },
+  {
+    "file": "e2e_densekv_vs_flashsvd_short_run2.log",
+    "pair_type": "densekv_vs_flashsvd",
+    "config": "short",
+    "run": 2,
+    "reported_speedup": 3.32,
+    "svd": {
+      "tag": "[DenseKVCacheBaseline] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=548 (REP=1, non-GQA)",
+      "prompt_len": 512,
+      "prefill_time_s": 0.405,
+      "prefill_tok_s": 1263.0,
+      "new_tokens": 32,
+      "decode_time_s": 1.035,
+      "decode_ms_per_token": 32.353,
+      "decode_tok_s": 31.0,
+      "total_time_s": 1.44
+    },
+    "flashsvd": {
+      "tag": "[FlashSVD-v1.5] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=548 (REP=1, non-GQA)",
+      "prompt_len": 512,
+      "prefill_time_s": 0.066,
+      "prefill_tok_s": 7783.0,
+      "new_tokens": 32,
+      "decode_time_s": 0.312,
+      "decode_ms_per_token": 9.754,
+      "decode_tok_s": 103.0,
+      "total_time_s": 0.378
+    },
+    "computed_speedup_decode": 3.316895632561001,
+    "computed_speedup_total": 3.8095238095238093
+  },
+  {
+    "file": "e2e_densekv_vs_flashsvd_short_run3.log",
+    "pair_type": "densekv_vs_flashsvd",
+    "config": "short",
+    "run": 3,
+    "reported_speedup": 3.29,
+    "svd": {
+      "tag": "[DenseKVCacheBaseline] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=548 (REP=1, non-GQA)",
+      "prompt_len": 512,
+      "prefill_time_s": 0.487,
+      "prefill_tok_s": 1051.0,
+      "new_tokens": 32,
+      "decode_time_s": 1.054,
+      "decode_ms_per_token": 32.937,
+      "decode_tok_s": 30.0,
+      "total_time_s": 1.541
+    },
+    "flashsvd": {
+      "tag": "[FlashSVD-v1.5] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=548 (REP=1, non-GQA)",
+      "prompt_len": 512,
+      "prefill_time_s": 0.056,
+      "prefill_tok_s": 9092.0,
+      "new_tokens": 32,
+      "decode_time_s": 0.321,
+      "decode_ms_per_token": 10.022,
+      "decode_tok_s": 100.0,
+      "total_time_s": 0.377
+    },
+    "computed_speedup_decode": 3.2864697665136697,
+    "computed_speedup_total": 4.087533156498673
+  },
+  {
+    "file": "e2e_densekv_vs_flashsvd_short_run4.log",
+    "pair_type": "densekv_vs_flashsvd",
+    "config": "short",
+    "run": 4,
+    "reported_speedup": 3.38,
+    "svd": {
+      "tag": "[DenseKVCacheBaseline] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=548 (REP=1, non-GQA)",
+      "prompt_len": 512,
+      "prefill_time_s": 0.428,
+      "prefill_tok_s": 1196.0,
+      "new_tokens": 32,
+      "decode_time_s": 1.049,
+      "decode_ms_per_token": 32.794,
+      "decode_tok_s": 30.0,
+      "total_time_s": 1.4769999999999999
+    },
+    "flashsvd": {
+      "tag": "[FlashSVD-v1.5] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=548 (REP=1, non-GQA)",
+      "prompt_len": 512,
+      "prefill_time_s": 0.097,
+      "prefill_tok_s": 5255.0,
+      "new_tokens": 32,
+      "decode_time_s": 0.31,
+      "decode_ms_per_token": 9.688,
+      "decode_tok_s": 103.0,
+      "total_time_s": 0.40700000000000003
+    },
+    "computed_speedup_decode": 3.385012386457473,
+    "computed_speedup_total": 3.6289926289926284
+  },
+  {
+    "file": "e2e_densekv_vs_flashsvd_short_run5.log",
+    "pair_type": "densekv_vs_flashsvd",
+    "config": "short",
+    "run": 5,
+    "reported_speedup": 3.6,
+    "svd": {
+      "tag": "[DenseKVCacheBaseline] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=548 (REP=1, non-GQA)",
+      "prompt_len": 512,
+      "prefill_time_s": 0.424,
+      "prefill_tok_s": 1206.0,
+      "new_tokens": 32,
+      "decode_time_s": 1.177,
+      "decode_ms_per_token": 36.779,
+      "decode_tok_s": 27.0,
+      "total_time_s": 1.601
+    },
+    "flashsvd": {
+      "tag": "[FlashSVD-v1.5] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=548 (REP=1, non-GQA)",
+      "prompt_len": 512,
+      "prefill_time_s": 0.06,
+      "prefill_tok_s": 8580.0,
+      "new_tokens": 32,
+      "decode_time_s": 0.327,
+      "decode_ms_per_token": 10.209,
+      "decode_tok_s": 98.0,
+      "total_time_s": 0.387
+    },
+    "computed_speedup_decode": 3.602605544127731,
+    "computed_speedup_total": 4.136950904392765
+  },
+  {
+    "file": "e2e_static_vs_flashsvd_long_run1.log",
+    "pair_type": "static_vs_flashsvd",
+    "config": "long",
+    "run": 1,
+    "reported_speedup": 2.94,
+    "svd": {
+      "tag": "[StaticCache] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=2180 (REP=1, non-GQA)",
+      "prompt_len": 2048,
+      "prefill_time_s": 0.581,
+      "prefill_tok_s": 3524.0,
+      "new_tokens": 128,
+      "decode_time_s": 3.84,
+      "decode_ms_per_token": 30.001,
+      "decode_tok_s": 33.0,
+      "total_time_s": 4.420999999999999
+    },
+    "flashsvd": {
+      "tag": "[FlashSVD-v1.5] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=2180 (REP=1, non-GQA)",
+      "prompt_len": 2048,
+      "prefill_time_s": 0.152,
+      "prefill_tok_s": 13471.0,
+      "new_tokens": 128,
+      "decode_time_s": 1.307,
+      "decode_ms_per_token": 10.212,
+      "decode_tok_s": 98.0,
+      "total_time_s": 1.4589999999999999
+    },
+    "computed_speedup_decode": 2.9378182530356445,
+    "computed_speedup_total": 3.030157642220699
+  },
+  {
+    "file": "e2e_static_vs_flashsvd_long_run2.log",
+    "pair_type": "static_vs_flashsvd",
+    "config": "long",
+    "run": 2,
+    "reported_speedup": 2.94,
+    "svd": {
+      "tag": "[StaticCache] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=2180 (REP=1, non-GQA)",
+      "prompt_len": 2048,
+      "prefill_time_s": 0.572,
+      "prefill_tok_s": 3581.0,
+      "new_tokens": 128,
+      "decode_time_s": 3.781,
+      "decode_ms_per_token": 29.538,
+      "decode_tok_s": 34.0,
+      "total_time_s": 4.353
+    },
+    "flashsvd": {
+      "tag": "[FlashSVD-v1.5] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=2180 (REP=1, non-GQA)",
+      "prompt_len": 2048,
+      "prefill_time_s": 0.167,
+      "prefill_tok_s": 12297.0,
+      "new_tokens": 128,
+      "decode_time_s": 1.287,
+      "decode_ms_per_token": 10.054,
+      "decode_tok_s": 99.0,
+      "total_time_s": 1.454
+    },
+    "computed_speedup_decode": 2.9379351501889794,
+    "computed_speedup_total": 2.993810178817056
+  },
+  {
+    "file": "e2e_static_vs_flashsvd_long_run3.log",
+    "pair_type": "static_vs_flashsvd",
+    "config": "long",
+    "run": 3,
+    "reported_speedup": 2.98,
+    "svd": {
+      "tag": "[StaticCache] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=2180 (REP=1, non-GQA)",
+      "prompt_len": 2048,
+      "prefill_time_s": 0.554,
+      "prefill_tok_s": 3694.0,
+      "new_tokens": 128,
+      "decode_time_s": 3.847,
+      "decode_ms_per_token": 30.056,
+      "decode_tok_s": 33.0,
+      "total_time_s": 4.401
+    },
+    "flashsvd": {
+      "tag": "[FlashSVD-v1.5] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=2180 (REP=1, non-GQA)",
+      "prompt_len": 2048,
+      "prefill_time_s": 0.147,
+      "prefill_tok_s": 13916.0,
+      "new_tokens": 128,
+      "decode_time_s": 1.292,
+      "decode_ms_per_token": 10.097,
+      "decode_tok_s": 99.0,
+      "total_time_s": 1.439
+    },
+    "computed_speedup_decode": 2.9767257601267705,
+    "computed_speedup_total": 3.0583738707435715
+  },
+  {
+    "file": "e2e_static_vs_flashsvd_long_run4.log",
+    "pair_type": "static_vs_flashsvd",
+    "config": "long",
+    "run": 4,
+    "reported_speedup": 2.89,
+    "svd": {
+      "tag": "[StaticCache] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=2180 (REP=1, non-GQA)",
+      "prompt_len": 2048,
+      "prefill_time_s": 0.578,
+      "prefill_tok_s": 3541.0,
+      "new_tokens": 128,
+      "decode_time_s": 3.777,
+      "decode_ms_per_token": 29.504,
+      "decode_tok_s": 34.0,
+      "total_time_s": 4.355
+    },
+    "flashsvd": {
+      "tag": "[FlashSVD-v1.5] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=2180 (REP=1, non-GQA)",
+      "prompt_len": 2048,
+      "prefill_time_s": 0.148,
+      "prefill_tok_s": 13815.0,
+      "new_tokens": 128,
+      "decode_time_s": 1.306,
+      "decode_ms_per_token": 10.2,
+      "decode_tok_s": 98.0,
+      "total_time_s": 1.454
+    },
+    "computed_speedup_decode": 2.8925490196078436,
+    "computed_speedup_total": 2.995185694635489
+  },
+  {
+    "file": "e2e_static_vs_flashsvd_long_run5.log",
+    "pair_type": "static_vs_flashsvd",
+    "config": "long",
+    "run": 5,
+    "reported_speedup": 2.98,
+    "svd": {
+      "tag": "[StaticCache] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=2180 (REP=1, non-GQA)",
+      "prompt_len": 2048,
+      "prefill_time_s": 0.582,
+      "prefill_tok_s": 3519.0,
+      "new_tokens": 128,
+      "decode_time_s": 3.85,
+      "decode_ms_per_token": 30.079,
+      "decode_tok_s": 33.0,
+      "total_time_s": 4.432
+    },
+    "flashsvd": {
+      "tag": "[FlashSVD-v1.5] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=2180 (REP=1, non-GQA)",
+      "prompt_len": 2048,
+      "prefill_time_s": 0.153,
+      "prefill_tok_s": 13365.0,
+      "new_tokens": 128,
+      "decode_time_s": 1.292,
+      "decode_ms_per_token": 10.092,
+      "decode_tok_s": 99.0,
+      "total_time_s": 1.445
+    },
+    "computed_speedup_decode": 2.9804795877923107,
+    "computed_speedup_total": 3.067128027681661
+  },
+  {
+    "file": "e2e_static_vs_flashsvd_short_run1.log",
+    "pair_type": "static_vs_flashsvd",
+    "config": "short",
+    "run": 1,
+    "reported_speedup": 3.15,
+    "svd": {
+      "tag": "[StaticCache] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=548 (REP=1, non-GQA)",
+      "prompt_len": 512,
+      "prefill_time_s": 0.454,
+      "prefill_tok_s": 1129.0,
+      "new_tokens": 32,
+      "decode_time_s": 0.983,
+      "decode_ms_per_token": 30.733,
+      "decode_tok_s": 33.0,
+      "total_time_s": 1.437
+    },
+    "flashsvd": {
+      "tag": "[FlashSVD-v1.5] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=548 (REP=1, non-GQA)",
+      "prompt_len": 512,
+      "prefill_time_s": 0.099,
+      "prefill_tok_s": 5191.0,
+      "new_tokens": 32,
+      "decode_time_s": 0.312,
+      "decode_ms_per_token": 9.752,
+      "decode_tok_s": 103.0,
+      "total_time_s": 0.41100000000000003
+    },
+    "computed_speedup_decode": 3.151456111566858,
+    "computed_speedup_total": 3.4963503649635035
+  },
+  {
+    "file": "e2e_static_vs_flashsvd_short_run2.log",
+    "pair_type": "static_vs_flashsvd",
+    "config": "short",
+    "run": 2,
+    "reported_speedup": 3.03,
+    "svd": {
+      "tag": "[StaticCache] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=548 (REP=1, non-GQA)",
+      "prompt_len": 512,
+      "prefill_time_s": 0.452,
+      "prefill_tok_s": 1133.0,
+      "new_tokens": 32,
+      "decode_time_s": 0.954,
+      "decode_ms_per_token": 29.814,
+      "decode_tok_s": 34.0,
+      "total_time_s": 1.406
+    },
+    "flashsvd": {
+      "tag": "[FlashSVD-v1.5] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=548 (REP=1, non-GQA)",
+      "prompt_len": 512,
+      "prefill_time_s": 0.058,
+      "prefill_tok_s": 8888.0,
+      "new_tokens": 32,
+      "decode_time_s": 0.315,
+      "decode_ms_per_token": 9.847,
+      "decode_tok_s": 102.0,
+      "total_time_s": 0.373
+    },
+    "computed_speedup_decode": 3.0277241799532852,
+    "computed_speedup_total": 3.7694369973190347
+  },
+  {
+    "file": "e2e_static_vs_flashsvd_short_run3.log",
+    "pair_type": "static_vs_flashsvd",
+    "config": "short",
+    "run": 3,
+    "reported_speedup": 2.97,
+    "svd": {
+      "tag": "[StaticCache] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=548 (REP=1, non-GQA)",
+      "prompt_len": 512,
+      "prefill_time_s": 0.444,
+      "prefill_tok_s": 1153.0,
+      "new_tokens": 32,
+      "decode_time_s": 0.949,
+      "decode_ms_per_token": 29.67,
+      "decode_tok_s": 34.0,
+      "total_time_s": 1.393
+    },
+    "flashsvd": {
+      "tag": "[FlashSVD-v1.5] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=548 (REP=1, non-GQA)",
+      "prompt_len": 512,
+      "prefill_time_s": 0.061,
+      "prefill_tok_s": 8414.0,
+      "new_tokens": 32,
+      "decode_time_s": 0.319,
+      "decode_ms_per_token": 9.98,
+      "decode_tok_s": 100.0,
+      "total_time_s": 0.38
+    },
+    "computed_speedup_decode": 2.972945891783567,
+    "computed_speedup_total": 3.6657894736842107
+  },
+  {
+    "file": "e2e_static_vs_flashsvd_short_run4.log",
+    "pair_type": "static_vs_flashsvd",
+    "config": "short",
+    "run": 4,
+    "reported_speedup": 2.97,
+    "svd": {
+      "tag": "[StaticCache] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=548 (REP=1, non-GQA)",
+      "prompt_len": 512,
+      "prefill_time_s": 0.488,
+      "prefill_tok_s": 1050.0,
+      "new_tokens": 32,
+      "decode_time_s": 0.956,
+      "decode_ms_per_token": 29.874,
+      "decode_tok_s": 33.0,
+      "total_time_s": 1.444
+    },
+    "flashsvd": {
+      "tag": "[FlashSVD-v1.5] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=548 (REP=1, non-GQA)",
+      "prompt_len": 512,
+      "prefill_time_s": 0.133,
+      "prefill_tok_s": 3862.0,
+      "new_tokens": 32,
+      "decode_time_s": 0.322,
+      "decode_ms_per_token": 10.053,
+      "decode_tok_s": 99.0,
+      "total_time_s": 0.455
+    },
+    "computed_speedup_decode": 2.971650253655625,
+    "computed_speedup_total": 3.1736263736263735
+  },
+  {
+    "file": "e2e_static_vs_flashsvd_short_run5.log",
+    "pair_type": "static_vs_flashsvd",
+    "config": "short",
+    "run": 5,
+    "reported_speedup": 2.89,
+    "svd": {
+      "tag": "[StaticCache] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=548 (REP=1, non-GQA)",
+      "prompt_len": 512,
+      "prefill_time_s": 0.427,
+      "prefill_tok_s": 1200.0,
+      "new_tokens": 32,
+      "decode_time_s": 0.928,
+      "decode_ms_per_token": 28.985,
+      "decode_tok_s": 35.0,
+      "total_time_s": 1.355
+    },
+    "flashsvd": {
+      "tag": "[FlashSVD-v1.5] H=32 Hk=32 REP=1 Dh=128 R=1024 max_cache_len=548 (REP=1, non-GQA)",
+      "prompt_len": 512,
+      "prefill_time_s": 0.079,
+      "prefill_tok_s": 6499.0,
+      "new_tokens": 32,
+      "decode_time_s": 0.321,
+      "decode_ms_per_token": 10.021,
+      "decode_tok_s": 100.0,
+      "total_time_s": 0.4
+    },
+    "computed_speedup_decode": 2.8924259055982433,
+    "computed_speedup_total": 3.3874999999999997
+  }
+]

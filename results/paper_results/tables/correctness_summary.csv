@@ -1,0 +1,4 @@
+label,exact_match_rate,mean_token_match,first_token_match_rate,mean_first_divergence_step_over_divergent
+StaticCache bf16,0.6,0.6828125,1.0,9.375
+DenseKV bf16,0.6,0.64375,0.9,6.375
+FlashSVD-v1.5 bf16,0.6,0.70859375,1.0,8.5
