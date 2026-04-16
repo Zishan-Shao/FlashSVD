@@ -1,0 +1,9 @@
+models/
+
+# Ignore caches and large artifacts
+__pycache__/
+*.pyc
+models/
+ModernBERT/model/
+ModernBERT/out/
+ModernBERT/out_sst2/

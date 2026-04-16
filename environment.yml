@@ -1,0 +1,14 @@
+name: flashsvdv15
+channels:
+  - conda-forge
+
+dependencies:
+  # Keep the conda layer thin: Python + build tools only.
+  # The CUDA/PyTorch stack lives in requirements.txt so pip-only installs stay aligned.
+  - python=3.13
+  - pip
+  - setuptools
+  - packaging
+  - ninja
+  - pip:
+      - -r requirements.txt

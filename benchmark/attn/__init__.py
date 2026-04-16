@@ -1,0 +1,1 @@
+"""Attention-focused benchmark entrypoints."""
