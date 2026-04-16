@@ -1,4 +1,4 @@
-# FlashSVD
+# FlashSVD v1.5: Making Low-Rank Transformers Inference Actually Fast
 
 FlashSVD is a streaming inference runtime for SVD-compressed language models.
 This repository now treats **FlashSVD v1.5** as the primary product path.
