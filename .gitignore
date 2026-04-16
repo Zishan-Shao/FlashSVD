@@ -5,8 +5,6 @@ __pycache__/
 .codex
 .codex/
 results/
-!results/docs_notes_archive/
-!results/docs_notes_archive/**
 FlashSVD-V2/
 checkpoints/**
 !checkpoints/

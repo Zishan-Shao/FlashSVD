@@ -1,3 +1,0 @@
-mode,gpu,total_forward_ms_per_token,attn_total_ms,mlp_total_ms,ln1_total_ms,ln2_total_ms,lm_head_ms,final_norm_ms,embed_tokens_ms,other_ms,notes
-DenseKVCacheBaseline,1,36.314,15.068,8.260,3.261,4.825,0.163,0.031,0.009,4.696,busy shared GPU baseline decode
-FlashSVD-v1.5,1,20.835,9.284,0.000,1.947,0.000,0.162,0.032,0.009,9.401,layer_tail CUDA graph active; replayed MLP/tail work collapses into other
