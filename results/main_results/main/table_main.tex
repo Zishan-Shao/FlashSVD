@@ -3,95 +3,46 @@
 
 \begin{table}[t]
 \centering
-\small
+\scriptsize
+\setlength{\tabcolsep}{3.6pt}
+\renewcommand{\arraystretch}{0.96}
 \begin{threeparttable}
-\caption{Main repeated-run decoder-serving results on the two headline settings.}
+\caption{Unified main results on public LowRankArena checkpoints under one serving configuration (A100, \texttt{bf16}, batch size 1, prompt length 512, decode length 32). Each row corresponds to one checkpoint family and ratio. FlashSVD is compared against the matched compressed checkpoint running with the DenseKV baseline and against a standard dense LLaMA-7B serving path. Averaged over 13 checkpoints, FlashSVD achieves 1.48$\times$ decode and 1.44$\times$ end-to-end speedup over DenseKV, and 1.12$\times$ decode and 1.45$\times$ end-to-end speedup over the dense baseline.}
+\label{tab:flashsvd-main}
+% Legacy labels retained for paper-draft compatibility.
 \label{tab:flashsvd-main-runtime}
-\begin{tabular}{llrrrrrr}
-\toprule
-Baseline & Config & Base decode & Flash decode & Decode speedup & Base total & Flash total & E2E speedup \\
-\midrule
-StaticCache & 512/32 & 29.814 & 9.980 & 2.99$\times$ & 1.406 & 0.400 & 3.51$\times$ \\
-StaticCache & 2048/128 & 30.001 & 10.097 & 2.97$\times$ & 4.401 & 1.454 & 3.03$\times$ \\
-DenseKV & 512/32 & 32.794 & 10.022 & 3.27$\times$ & 1.477 & 0.387 & 3.82$\times$ \\
-DenseKV & 2048/128 & 32.771 & 10.189 & 3.22$\times$ & 4.728 & 1.451 & 3.26$\times$ \\
-\bottomrule
-\end{tabular}
-\begin{tablenotes}[flushleft]\footnotesize
-\item All values are repeated-run medians under matched checkpoint, precision, and hardware settings.
-\item Decode is reported in ms/token and total latency is prefill plus decode.
-\end{tablenotes}
-\end{threeparttable}
-\end{table}
-
-\begin{table}[t]
-\centering
-\small
-\begin{threeparttable}
-\caption{Average FlashSVD v1.5 speedup across supported low-rank checkpoint families under the unified LLaMA-7B serving configuration.}
 \label{tab:flashsvd-family-coverage}
-\begin{tabular}{lrrrr}
-\toprule
-Family & Checkpoints & Prefill speedup & Decode speedup & E2E speedup \\
-\midrule
-SVD-LLM v1 & 5 & 1.55$\times$ & 1.45$\times$ & 1.46$\times$ \\
-SVD-LLM v2 & 5 & 1.14$\times$ & 1.50$\times$ & 1.45$\times$ \\
-Basis Sharing & 3 & 0.91$\times$ & 1.49$\times$ & 1.42$\times$ \\
-Overall & 13 & 1.25$\times$ & 1.48$\times$ & 1.44$\times$ \\
-\bottomrule
-\end{tabular}
-\begin{tablenotes}[flushleft]\footnotesize
-\item Each family average is computed over the matched open-source checkpoints in LowRankArena. End-to-end speedup is computed on prefill plus 32-token decode.
-\end{tablenotes}
-\end{threeparttable}
-\end{table}
-
-\begin{table}[t]
-\centering
-\small
-\begin{threeparttable}
-\caption{Extended long-prompt results averaged over ratios 0.5--0.8 at batch size 1.}
 \label{tab:flashsvd-long-prompt}
-\begin{tabular}{llrrrrrr}
+\begin{tabular}{@{}llrrcccc@{}}
 \toprule
-Baseline & Prompt & Base decode & Flash decode & Decode speedup & Base total & Flash total & E2E speedup \\
+& & \multicolumn{2}{c}{FlashSVD} & \multicolumn{2}{c}{vs DenseKV Baseline} & \multicolumn{2}{c}{vs Dense LLaMA-7B} \\
+\cmidrule(lr){3-4} \cmidrule(lr){5-6} \cmidrule(lr){7-8}
+Family & Ratio & Total (s) & Decode (ms/tok) & Decode & E2E & Decode & E2E \\
 \midrule
-StaticCache & 4K & 30.185 & 15.925 & 1.90$\times$ & 4.639 & 2.698 & 1.72$\times$ \\
-StaticCache & 8K & 32.570 & 17.092 & 1.91$\times$ & 5.928 & 3.536 & 1.68$\times$ \\
-DenseKV & 4K & 25.958 & 15.925 & 1.63$\times$ & 4.013 & 2.698 & 1.49$\times$ \\
-DenseKV & 8K & 25.754 & 17.092 & 1.51$\times$ & 4.704 & 3.536 & 1.33$\times$ \\
+SVD-LLM v1 & 0.4 & 1.044 & 26.556 & 1.33$\times$ & 1.32$\times$ & 1.01$\times$ & 1.23$\times$ \\
+ & 0.5 & 0.937 & 26.369 & 1.40$\times$ & 1.37$\times$ & 1.02$\times$ & 1.38$\times$ \\
+ & 0.6 & 0.939 & 23.176 & 1.53$\times$ & 1.44$\times$ & 1.16$\times$ & 1.37$\times$ \\
+ & 0.7 & 0.913 & 22.573 & 1.55$\times$ & 1.58$\times$ & 1.19$\times$ & 1.41$\times$ \\
+ & 0.8 & 0.887 & 24.469 & 1.45$\times$ & 1.58$\times$ & 1.10$\times$ & 1.45$\times$ \\
+\midrule
+SVD-LLM v2 & 0.4 & 0.818 & 23.332 & 1.52$\times$ & 1.47$\times$ & 1.15$\times$ & 1.58$\times$ \\
+ & 0.5 & 0.872 & 24.377 & 1.47$\times$ & 1.48$\times$ & 1.10$\times$ & 1.48$\times$ \\
+ & 0.6 & 0.885 & 22.987 & 1.50$\times$ & 1.43$\times$ & 1.17$\times$ & 1.46$\times$ \\
+ & 0.7 & 0.917 & 23.231 & 1.53$\times$ & 1.44$\times$ & 1.16$\times$ & 1.41$\times$ \\
+ & 0.8 & 0.864 & 23.735 & 1.47$\times$ & 1.41$\times$ & 1.13$\times$ & 1.49$\times$ \\
+\midrule
+Basis Sharing & 0.4 & 0.823 & 23.351 & 1.50$\times$ & 1.49$\times$ & 1.15$\times$ & 1.57$\times$ \\
+ & 0.5 & 0.869 & 23.840 & 1.45$\times$ & 1.35$\times$ & 1.13$\times$ & 1.48$\times$ \\
+ & 0.6 & 0.863 & 23.337 & 1.52$\times$ & 1.41$\times$ & 1.15$\times$ & 1.49$\times$ \\
+\midrule
+Overall avg & 13 ckpts & -- & -- & 1.48$\times$ & 1.44$\times$ & 1.12$\times$ & 1.45$\times$ \\
 \bottomrule
 \end{tabular}
 \begin{tablenotes}[flushleft]\footnotesize
-\item Decode is reported in ms/token and total latency is prefill plus 128-token decode. Each row averages median results from the ratio sweep.
-\end{tablenotes}
-\end{threeparttable}
-\end{table}
-
-\begin{table}[t]
-\centering
-\small
-\begin{threeparttable}
-\caption{Extended decode-length sweep averaged over ratios 0.5--0.8 at batch size 1.}
-\label{tab:flashsvd-decode-sweep}
-\begin{tabular}{llrrr}
-\toprule
-Baseline & Generated tokens & Base decode & Flash decode & Decode speedup \\
-\midrule
-StaticCache & 64 & 30.524 & 14.668 & 2.08$\times$ \\
-StaticCache & 1024 & 30.127 & 15.050 & 2.00$\times$ \\
-StaticCache & 4096 & 30.261 & 15.685 & 1.93$\times$ \\
-StaticCache & 8192 & 33.152 & 16.427 & 2.02$\times$ \\
-StaticCache & 16384 & 47.010 & 17.992 & 2.61$\times$ \\
-DenseKV & 64 & 25.879 & 14.668 & 1.76$\times$ \\
-DenseKV & 1024 & 25.901 & 15.050 & 1.72$\times$ \\
-DenseKV & 4096 & 25.961 & 15.685 & 1.66$\times$ \\
-DenseKV & 8192 & 25.912 & 16.427 & 1.58$\times$ \\
-DenseKV & 16384 & 26.012 & 17.992 & 1.45$\times$ \\
-\bottomrule
-\end{tabular}
-\begin{tablenotes}[flushleft]\footnotesize
-\item Decode is reported in ms/token. The sweep spans 64 to 16384 generated tokens; the table keeps a representative subset including the 16K endpoint.
+\item DenseKV baseline uses the same compressed checkpoint with the aligned dense-KV runtime from the LowRankArena benchmark. Dense LLaMA-7B uses \texttt{jeffwan/llama-7b-hf} under the standard dense serving path.
+\item Dense LLaMA-7B baseline numbers are prefill $=0.429$ s, decode $=26.864$ ms/token, end-to-end $=1.289$ s.
+\item End-to-end latency is prefill plus 32-token decode. Basis Sharing checkpoints at ratios 0.7 and 0.8 are unavailable in the public release and are therefore omitted.
+\item Appendix results retain long-prompt averages of 1.51$\times$--1.91$\times$ decode and 1.33$\times$--1.72$\times$ end-to-end speedup, plus a decode-length sweep with 1.45$\times$--2.61$\times$ average decode speedup over 64--16384 generated tokens.
 \end{tablenotes}
 \end{threeparttable}
 \end{table}

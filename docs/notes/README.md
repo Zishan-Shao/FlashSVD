@@ -14,16 +14,19 @@ Start here.
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md)
   Runtime ownership and folder boundaries.
 
-## Archive
+## Local Results Archive
 
-Older long-form experiment logs were moved under [`archive/`](./archive/):
+Older experiment logs, tables, and dated result snapshots were moved out of
+`docs/` and into the local `results/docs_notes_archive/` folder.
 
-- [`archive/decoder_backend_quick_notes_2026-03-07.md`](./archive/decoder_backend_quick_notes_2026-03-07.md)
-- [`archive/flashsvd_edge_decode_status_2026-03-06.md`](./archive/flashsvd_edge_decode_status_2026-03-06.md)
-- [`archive/FlashSVD_profiling_notes.md`](./archive/FlashSVD_profiling_notes.md)
+That bucket now holds:
 
-Rule of thumb:
+- historical experiment writeups
+- dated comparison tables and JSON dumps
+- older archive notes that are useful for local forensics only
+
+Rule of thumb for this tracked `docs/notes/` folder:
 
 - use `CURRENT_STATUS.md` for the answer to "what is the current winner?"
 - use `quick_commands.md` for "what should I run now?"
-- use `archive/` only for historical context
+- use `results/docs_notes_archive/` only for local historical context

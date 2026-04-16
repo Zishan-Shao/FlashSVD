@@ -2,6 +2,12 @@
 __pycache__/
 *.pyc
 .cache/
+.codex
+.codex/
+results/
+!results/docs_notes_archive/
+!results/docs_notes_archive/**
+FlashSVD-V2/
 checkpoints/**
 !checkpoints/
 !checkpoints/.gitkeep
@@ -9,6 +15,8 @@ checkpoints/**
 !checkpoints/quantized/.gitkeep
 !checkpoints/dobisvd/
 !checkpoints/dobisvd/.gitkeep
+checkpoints/hf_exports/
+checkpoints/upload_stage/
 models/
 ModernBERT/model/
 ModernBERT/out/

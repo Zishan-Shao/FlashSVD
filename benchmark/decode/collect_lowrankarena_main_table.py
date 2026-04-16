@@ -5,6 +5,7 @@ import argparse
 import json
 from dataclasses import dataclass
 from pathlib import Path
+import statistics
 import sys
 import time
 import traceback
@@ -48,7 +49,10 @@ class SVDLLMV1Spec(FamilySpec):
 
 class SVDLLMV2Spec(FamilySpec):
     def hf_subdir(self, ratio_text: str) -> str:
-        return f"llama_7b/SVDLLMv2/jeffwan_llama_7b_hf_svdllmv2_keep{ratio_text}_hf"
+        # Public LowRankArena SVD-LLM v2 checkpoints are named by removed ratio
+        # (e.g. keep=0.8 -> r20, keep=0.7 -> r30).
+        pct = int(round((1.0 - float(ratio_text)) * 100))
+        return f"llama_7b/SVDLLMv2/jeffwan_llama_7b_hf_svdllmv2_r{pct}_hf"
 
     def local_root(self, ratio_text: str) -> Path:
         return WORKSPACE / "models" / "lowrankarena" / f"svdllmv2_keep{ratio_text}"
@@ -56,11 +60,13 @@ class SVDLLMV2Spec(FamilySpec):
 
 class BasisSharingSpec(FamilySpec):
     def hf_subdir(self, ratio_text: str) -> str:
-        pct = int(round(float(ratio_text) * 100))
+        # Public LowRankArena Basis Sharing checkpoints are also named by removed ratio
+        # (e.g. keep=0.8 -> share_llama-7b_20, keep=0.7 -> share_llama-7b_30).
+        pct = int(round((1.0 - float(ratio_text)) * 100))
         return f"llama_7b/Basis_Sharing/share_llama-7b_{pct}"
 
     def local_root(self, ratio_text: str) -> Path:
-        pct = int(round(float(ratio_text) * 100))
+        pct = int(round((1.0 - float(ratio_text)) * 100))
         return WORKSPACE / "models" / "lowrankarena" / f"basis_sharing_{pct}"
 
 
@@ -101,6 +107,7 @@ def _run_pair(
     warmup: int,
     batch_size: int,
     ffn_backend: str,
+    mlp_graph_scope: str,
 ):
     baseline = _bench_one_mode(
         mode="svd",
@@ -115,7 +122,7 @@ def _run_pair(
         max_cache_len=0,
         ffn_backend=ffn_backend,
         enable_mlp_graph=True,
-        mlp_graph_scope="mlp",
+        mlp_graph_scope=mlp_graph_scope,
         graph_alias_output=False,
         enable_flash_dense_attn=False,
         enable_cutlass_rope_attn=False,
@@ -134,7 +141,7 @@ def _run_pair(
         max_cache_len=0,
         ffn_backend=ffn_backend,
         enable_mlp_graph=True,
-        mlp_graph_scope="mlp",
+        mlp_graph_scope=mlp_graph_scope,
         graph_alias_output=False,
         enable_flash_dense_attn=True,
         enable_cutlass_rope_attn=False,
@@ -145,6 +152,49 @@ def _run_pair(
 
 def _format_float(value: float, digits: int = 3) -> str:
     return f"{float(value):.{digits}f}"
+
+
+def _aggregate_repeat_rows(repeats: list[dict[str, object]]) -> dict[str, object]:
+    ok_rows = [row for row in repeats if row.get("status") == "ok"]
+    if not ok_rows:
+        first = repeats[0] if repeats else {}
+        return {
+            "status": "error",
+            "ok_repeats": 0,
+            "requested_repeats": len(repeats),
+            "error": first.get("error", "all repeats failed"),
+            "traceback": first.get("traceback"),
+        }
+
+    metric_keys = [
+        "baseline_prefill_time_s",
+        "baseline_decode_time_s",
+        "flash_prefill_time_s",
+        "flash_decode_time_s",
+        "baseline_prefill_tok_s",
+        "flash_prefill_tok_s",
+        "baseline_decode_ms",
+        "flash_decode_ms",
+        "baseline_decode_tok_s",
+        "flash_decode_tok_s",
+        "prefill_speedup_x",
+        "decode_speedup_x",
+        "baseline_e2e_time_s",
+        "flash_e2e_time_s",
+        "e2e_speedup_x",
+    ]
+    summary: dict[str, object] = {
+        "status": "ok" if len(ok_rows) == len(repeats) else "partial",
+        "ok_repeats": len(ok_rows),
+        "requested_repeats": len(repeats),
+    }
+    for key in metric_keys:
+        values = [float(row[key]) for row in ok_rows]
+        summary[key] = float(statistics.fmean(values))
+        summary[f"{key}_std"] = float(statistics.stdev(values)) if len(values) > 1 else 0.0
+        summary[f"{key}_min"] = float(min(values))
+        summary[f"{key}_max"] = float(max(values))
+    return summary
 
 
 def _build_markdown(
@@ -167,47 +217,72 @@ def _build_markdown(
     lines.append(f"- New tokens: `{config['new_tokens']}`")
     lines.append(f"- Warmup: `{config['warmup']}`")
     lines.append(f"- Batch size: `{config['batch_size']}`")
+    lines.append(f"- Repeats: `{config['repeats']}`")
     lines.append(f"- FlashSVD MLP backend: `{config['ffn_backend']}`")
+    lines.append(f"- MLP CUDA graph scope: `{config['mlp_graph_scope']}`")
     lines.append("- Compare mode: baseline dense-KV vs FlashSVD production packed path")
     lines.append("")
     lines.append("## Main Table")
     lines.append("")
-    lines.append("| Family | Ratio | Baseline Prefill (s) | FlashSVD Prefill (s) | Prefill Speedup | Baseline Decode (ms/token) | FlashSVD Decode (ms/token) | Decode Speedup |")
-    lines.append("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
+    lines.append("| Family | Ratio | n | Baseline Prefill (s) | FlashSVD Prefill (s) | Prefill Speedup | Baseline Decode (ms/token) | FlashSVD Decode (ms/token) | Decode Speedup | Baseline E2E (s) | FlashSVD E2E (s) | E2E Speedup |")
+    lines.append("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
     for row in results:
-        if row["status"] != "ok":
+        if row["status"] == "error":
             lines.append(
-                f"| {row['family_name']} | {row['ratio']} | fail | fail | fail | fail | fail | fail |"
+                f"| {row['family_name']} | {row['ratio']} | 0/{row.get('requested_repeats', 0)} | fail | fail | fail | fail | fail | fail | fail | fail | fail |"
             )
             continue
         lines.append(
-            f"| {row['family_name']} | {row['ratio']} | "
+            f"| {row['family_name']} | {row['ratio']} | {row['ok_repeats']}/{row['requested_repeats']} | "
             f"{_format_float(row['baseline_prefill_time_s'])} | "
             f"{_format_float(row['flash_prefill_time_s'])} | "
-            f"{_format_float(row['prefill_speedup_x'], 2)}x | "
+            f"{_format_float(row['prefill_speedup_x'], 2)}x ± {_format_float(row['prefill_speedup_x_std'], 2)} | "
             f"{_format_float(row['baseline_decode_ms'])} | "
             f"{_format_float(row['flash_decode_ms'])} | "
-            f"{_format_float(row['decode_speedup_x'], 2)}x |"
+            f"{_format_float(row['decode_speedup_x'], 2)}x ± {_format_float(row['decode_speedup_x_std'], 2)} | "
+            f"{_format_float(row['baseline_e2e_time_s'])} | "
+            f"{_format_float(row['flash_e2e_time_s'])} | "
+            f"{_format_float(row['e2e_speedup_x'], 2)}x ± {_format_float(row['e2e_speedup_x_std'], 2)} |"
         )
     lines.append("")
     lines.append("## Detailed Throughput")
     lines.append("")
-    lines.append("| Family | Ratio | Baseline Prefill Tok/s | FlashSVD Prefill Tok/s | Baseline Decode Tok/s | FlashSVD Decode Tok/s | Checkpoint |")
-    lines.append("| --- | ---: | ---: | ---: | ---: | ---: | --- |")
+    lines.append("| Family | Ratio | n | Baseline Prefill Tok/s | FlashSVD Prefill Tok/s | Baseline Decode Tok/s | FlashSVD Decode Tok/s | Checkpoint |")
+    lines.append("| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |")
     for row in results:
-        if row["status"] != "ok":
+        if row["status"] == "error":
             lines.append(
-                f"| {row['family_name']} | {row['ratio']} | fail | fail | fail | fail | `{row['checkpoint']}` |"
+                f"| {row['family_name']} | {row['ratio']} | 0/{row.get('requested_repeats', 0)} | fail | fail | fail | fail | `{row.get('checkpoint', '')}` |"
             )
             continue
         lines.append(
-            f"| {row['family_name']} | {row['ratio']} | "
+            f"| {row['family_name']} | {row['ratio']} | {row['ok_repeats']}/{row['requested_repeats']} | "
             f"{_format_float(row['baseline_prefill_tok_s'], 0)} | "
             f"{_format_float(row['flash_prefill_tok_s'], 0)} | "
             f"{_format_float(row['baseline_decode_tok_s'], 0)} | "
             f"{_format_float(row['flash_decode_tok_s'], 0)} | "
             f"`{row['checkpoint']}` |"
         )
+    lines.append("")
+    lines.append("## Per-repeat Results")
+    lines.append("")
+    lines.append("| Family | Ratio | Repeat | Prefill Speedup | Decode Speedup | E2E Speedup | Baseline Decode (ms/token) | FlashSVD Decode (ms/token) | Status |")
+    lines.append("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |")
+    for row in results:
+        for repeat in row.get("repeats", []):
+            if repeat.get("status") != "ok":
+                lines.append(
+                    f"| {row['family_name']} | {row['ratio']} | {repeat.get('repeat_index', '?')} | fail | fail | fail | fail | fail | {repeat.get('error', 'error')} |"
+                )
+                continue
+            lines.append(
+                f"| {row['family_name']} | {row['ratio']} | {repeat['repeat_index']} | "
+                f"{_format_float(repeat['prefill_speedup_x'], 2)}x | "
+                f"{_format_float(repeat['decode_speedup_x'], 2)}x | "
+                f"{_format_float(repeat['e2e_speedup_x'], 2)}x | "
+                f"{_format_float(repeat['baseline_decode_ms'])} | "
+                f"{_format_float(repeat['flash_decode_ms'])} | ok |"
+            )
     failed = [row for row in results if row["status"] != "ok"]
     if failed:
         lines.append("")
@@ -241,16 +316,18 @@ def main() -> int:
     ap.add_argument("--new_tokens", type=int, default=32)
     ap.add_argument("--warmup", type=int, default=3)
     ap.add_argument("--batch_size", type=int, default=1)
+    ap.add_argument("--repeats", type=int, default=1)
     ap.add_argument("--ffn_backend", type=str, default="flashsvd_mlp_dual_split_prod")
+    ap.add_argument("--mlp_graph_scope", type=str, default="mlp")
     ap.add_argument(
         "--md_out",
         type=str,
-        default=str(ROOT / "notes" / "lowrankarena_main_table_2026-03-17.md"),
+        default=str(WORKSPACE / "results" / "docs_notes_archive" / "lowrankarena_main_table_2026-03-17.md"),
     )
     ap.add_argument(
         "--json_out",
         type=str,
-        default=str(ROOT / "notes" / "lowrankarena_main_table_2026-03-17.json"),
+        default=str(WORKSPACE / "results" / "docs_notes_archive" / "lowrankarena_main_table_2026-03-17.json"),
     )
     args = ap.parse_args()
 
@@ -273,35 +350,61 @@ def main() -> int:
             try:
                 ckpt = _download_checkpoint(spec, ratio_text)
                 row["checkpoint"] = str(ckpt)
-                baseline, flashsvd = _run_pair(
-                    checkpoint=str(ckpt),
-                    dtype=args.dtype,
-                    device=args.device,
-                    prompt_len=args.prompt_len,
-                    new_tokens=args.new_tokens,
-                    warmup=args.warmup,
-                    batch_size=args.batch_size,
-                    ffn_backend=args.ffn_backend,
-                )
-                row.update(
-                    {
-                        "status": "ok",
-                        "baseline_prefill_time_s": float(baseline["prefill_time_s"]),
-                        "flash_prefill_time_s": float(flashsvd["prefill_time_s"]),
-                        "baseline_prefill_tok_s": float(baseline["prefill_tok_s"]),
-                        "flash_prefill_tok_s": float(flashsvd["prefill_tok_s"]),
-                        "baseline_decode_ms": float(baseline["decode_ms_per_token"]),
-                        "flash_decode_ms": float(flashsvd["decode_ms_per_token"]),
-                        "baseline_decode_tok_s": float(baseline["decode_tok_s"]),
-                        "flash_decode_tok_s": float(flashsvd["decode_tok_s"]),
+                repeats: list[dict[str, object]] = []
+                for repeat_index in range(1, int(args.repeats) + 1):
+                    repeat_row: dict[str, object] = {
+                        "repeat_index": repeat_index,
+                        "checkpoint": str(ckpt),
                     }
-                )
-                row["prefill_speedup_x"] = float(row["flash_prefill_tok_s"]) / max(
-                    1e-12, float(row["baseline_prefill_tok_s"])
-                )
-                row["decode_speedup_x"] = float(row["baseline_decode_ms"]) / max(
-                    1e-12, float(row["flash_decode_ms"])
-                )
+                    try:
+                        baseline, flashsvd = _run_pair(
+                            checkpoint=str(ckpt),
+                            dtype=args.dtype,
+                            device=args.device,
+                            prompt_len=args.prompt_len,
+                            new_tokens=args.new_tokens,
+                            warmup=args.warmup,
+                            batch_size=args.batch_size,
+                            ffn_backend=args.ffn_backend,
+                            mlp_graph_scope=args.mlp_graph_scope,
+                        )
+                        repeat_row.update(
+                            {
+                                "status": "ok",
+                                "baseline_prefill_time_s": float(baseline["prefill_time_s"]),
+                                "baseline_decode_time_s": float(baseline["decode_time_s"]),
+                                "flash_prefill_time_s": float(flashsvd["prefill_time_s"]),
+                                "flash_decode_time_s": float(flashsvd["decode_time_s"]),
+                                "baseline_prefill_tok_s": float(baseline["prefill_tok_s"]),
+                                "flash_prefill_tok_s": float(flashsvd["prefill_tok_s"]),
+                                "baseline_decode_ms": float(baseline["decode_ms_per_token"]),
+                                "flash_decode_ms": float(flashsvd["decode_ms_per_token"]),
+                                "baseline_decode_tok_s": float(baseline["decode_tok_s"]),
+                                "flash_decode_tok_s": float(flashsvd["decode_tok_s"]),
+                            }
+                        )
+                        repeat_row["prefill_speedup_x"] = float(repeat_row["flash_prefill_tok_s"]) / max(
+                            1e-12, float(repeat_row["baseline_prefill_tok_s"])
+                        )
+                        repeat_row["decode_speedup_x"] = float(repeat_row["baseline_decode_ms"]) / max(
+                            1e-12, float(repeat_row["flash_decode_ms"])
+                        )
+                        repeat_row["baseline_e2e_time_s"] = float(repeat_row["baseline_prefill_time_s"]) + float(
+                            repeat_row["baseline_decode_time_s"]
+                        )
+                        repeat_row["flash_e2e_time_s"] = float(repeat_row["flash_prefill_time_s"]) + float(
+                            repeat_row["flash_decode_time_s"]
+                        )
+                        repeat_row["e2e_speedup_x"] = float(repeat_row["baseline_e2e_time_s"]) / max(
+                            1e-12, float(repeat_row["flash_e2e_time_s"])
+                        )
+                    except Exception as exc:
+                        repeat_row["status"] = "error"
+                        repeat_row["error"] = f"{type(exc).__name__}: {exc}"
+                        repeat_row["traceback"] = traceback.format_exc()
+                    repeats.append(repeat_row)
+                row["repeats"] = repeats
+                row.update(_aggregate_repeat_rows(repeats))
             except Exception as exc:
                 row["status"] = "error"
                 row["error"] = f"{type(exc).__name__}: {exc}"
@@ -322,7 +425,9 @@ def main() -> int:
         "new_tokens": args.new_tokens,
         "warmup": args.warmup,
         "batch_size": args.batch_size,
+        "repeats": args.repeats,
         "ffn_backend": args.ffn_backend,
+        "mlp_graph_scope": args.mlp_graph_scope,
     }
     md_text = _build_markdown(results=results, config=config, md_path=md_path)
     md_path.write_text(md_text, encoding="utf-8")

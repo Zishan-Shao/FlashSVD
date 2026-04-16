@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import math
+import re
 from collections import defaultdict
 from pathlib import Path
 from statistics import mean
@@ -372,6 +373,73 @@ def family_summary_rows() -> list[dict]:
     return ordered
 
 
+def family_detailed_rows() -> list[dict]:
+    rows = load_json(REPO_DIR / "docs" / "notes" / "lowrankarena_main_table_extended_2026-03-17.json")
+    packed = []
+    family_order = {"SVD-LLM v1": 0, "SVD-LLM v2": 1, "Basis Sharing": 2}
+    for row in rows:
+        if row.get("status") != "ok":
+            continue
+        e2e_speedup = (row["baseline_prefill_time_s"] + 32.0 * row["baseline_decode_ms"] / 1000.0) / (
+            row["flash_prefill_time_s"] + 32.0 * row["flash_decode_ms"] / 1000.0
+        )
+        packed.append(
+            {
+                "family": row["family_name"],
+                "ratio": str(row["ratio"]),
+                "prefill_speedup": row["prefill_speedup_x"],
+                "decode_speedup": row["decode_speedup_x"],
+                "e2e_speedup": e2e_speedup,
+                "sort_key": (family_order[row["family_name"]], float(row["ratio"])),
+            }
+        )
+    packed.sort(key=lambda item: item["sort_key"])
+    return packed
+
+
+def dense_baseline_stats() -> dict[str, float]:
+    text = (REPO_DIR / "docs" / "notes" / "speedup_vs_dense_and_lowrank_2026-03-17.md").read_text()
+
+    def extract(pattern: str) -> float:
+        match = re.search(pattern, text)
+        if match is None:
+            raise RuntimeError(f"failed to parse dense baseline stat with pattern: {pattern}")
+        return float(match.group(1))
+
+    return {
+        "prefill_s": extract(r"Dense prefill: `([0-9.]+) s`"),
+        "decode_ms": extract(r"Dense decode: `([0-9.]+) ms/token`"),
+        "e2e_s": extract(r"Dense end-to-end: `([0-9.]+) s`"),
+    }
+
+
+def unified_family_rows() -> list[dict]:
+    rows = load_json(REPO_DIR / "docs" / "notes" / "lowrankarena_main_table_extended_2026-03-17.json")
+    dense = dense_baseline_stats()
+    family_order = {"SVD-LLM v1": 0, "SVD-LLM v2": 1, "Basis Sharing": 2}
+    packed = []
+    for row in rows:
+        if row.get("status") != "ok":
+            continue
+        flash_total = row["flash_prefill_time_s"] + 32.0 * row["flash_decode_ms"] / 1000.0
+        lowrank_total = row["baseline_prefill_time_s"] + 32.0 * row["baseline_decode_ms"] / 1000.0
+        packed.append(
+            {
+                "family": row["family_name"],
+                "ratio": str(row["ratio"]),
+                "flash_total_s": flash_total,
+                "flash_decode_ms": row["flash_decode_ms"],
+                "densekv_decode_speedup": row["decode_speedup_x"],
+                "densekv_e2e_speedup": lowrank_total / flash_total,
+                "dense_decode_speedup": dense["decode_ms"] / row["flash_decode_ms"],
+                "dense_e2e_speedup": dense["e2e_s"] / flash_total,
+                "sort_key": (family_order[row["family_name"]], float(row["ratio"])),
+            }
+        )
+    packed.sort(key=lambda item: item["sort_key"])
+    return packed
+
+
 def long_prompt_rows() -> list[dict]:
     data = load_json(
         RESULTS_DIR / "runtime_study_full_2026-03-31_long_context_decode_sweep" / "tables" / "stage_summary.json"
@@ -429,6 +497,28 @@ def decode_sweep_rows() -> list[dict]:
                     "baseline_decode_ms": b_decode,
                     "flash_decode_ms": f_decode,
                     "decode_speedup": b_decode / f_decode,
+                }
+            )
+    return rows
+
+
+def ratio_sweep_rows() -> list[dict]:
+    data = load_json(RESULTS_DIR / "runtime_study_full_2026-03-31_ratio_sweep" / "tables" / "ratio_sweep_summary.json")[
+        "ratios"
+    ]
+    rows = []
+    for ratio in sorted(data, key=float):
+        for config, config_label in (("short", "512/32"), ("long", "2048/128")):
+            static = data[ratio][f"static_vs_flashsvd:{config}"]
+            dense = data[ratio][f"densekv_vs_flashsvd:{config}"]
+            rows.append(
+                {
+                    "ratio": ratio,
+                    "config": config_label,
+                    "static_decode_speedup": static["decode_speedup_median"],
+                    "static_e2e_speedup": static["total_speedup_median"],
+                    "dense_decode_speedup": dense["decode_speedup_median"],
+                    "dense_e2e_speedup": dense["total_speedup_median"],
                 }
             )
     return rows
@@ -703,10 +793,20 @@ def build_ablation_figure() -> None:
 
 
 def build_main_tables() -> None:
-    runtime = main_runtime_rows()
-    families = family_summary_rows()
+    dense = dense_baseline_stats()
+    family_rows = unified_family_rows()
+    family_summary = family_summary_rows()
     long_prompt = long_prompt_rows()
     sweep_rows = decode_sweep_rows()
+    long_prompt_decode_min = min(row["decode_speedup"] for row in long_prompt)
+    long_prompt_decode_max = max(row["decode_speedup"] for row in long_prompt)
+    long_prompt_e2e_min = min(row["e2e_speedup"] for row in long_prompt)
+    long_prompt_e2e_max = max(row["e2e_speedup"] for row in long_prompt)
+    sweep_min = min(row["decode_speedup"] for row in sweep_rows)
+    sweep_max = max(row["decode_speedup"] for row in sweep_rows)
+    overall = next(row for row in family_summary if row["family"] == "Overall")
+    dense_decode_avg = avg([row["dense_decode_speedup"] for row in family_rows])
+    dense_e2e_avg = avg([row["dense_e2e_speedup"] for row in family_rows])
 
     lines = [
         "% Auto-generated by results/main_results/scripts/generate_main_results.py",
@@ -714,109 +814,61 @@ def build_main_tables() -> None:
         "",
         "\\begin{table}[t]",
         "\\centering",
-        "\\small",
+        "\\scriptsize",
+        "\\setlength{\\tabcolsep}{3.6pt}",
+        "\\renewcommand{\\arraystretch}{0.96}",
         "\\begin{threeparttable}",
-        "\\caption{Main repeated-run decoder-serving results on the two headline settings.}",
+        (
+            "\\caption{Unified main results on public LowRankArena checkpoints under one serving configuration "
+            "(A100, \\texttt{bf16}, batch size 1, prompt length 512, decode length 32). "
+            "Each row corresponds to one checkpoint family and ratio. FlashSVD is compared against the matched "
+            "compressed checkpoint running with the DenseKV baseline and against a standard dense LLaMA-7B serving path. "
+            f"Averaged over 13 checkpoints, FlashSVD achieves {overall['decode_speedup']:.2f}$\\times$ decode and "
+            f"{overall['e2e_speedup']:.2f}$\\times$ end-to-end speedup over DenseKV, and {dense_decode_avg:.2f}$\\times$ "
+            f"decode and {dense_e2e_avg:.2f}$\\times$ end-to-end speedup over the dense baseline.}}"
+        ),
+        "\\label{tab:flashsvd-main}",
+        "% Legacy labels retained for paper-draft compatibility.",
         "\\label{tab:flashsvd-main-runtime}",
-        "\\begin{tabular}{llrrrrrr}",
+        "\\label{tab:flashsvd-family-coverage}",
+        "\\label{tab:flashsvd-long-prompt}",
+        "\\begin{tabular}{@{}llrrcccc@{}}",
         "\\toprule",
-        "Baseline & Config & Base decode & Flash decode & Decode speedup & Base total & Flash total & E2E speedup \\\\",
+        "& & \\multicolumn{2}{c}{FlashSVD} & \\multicolumn{2}{c}{vs DenseKV Baseline} & \\multicolumn{2}{c}{vs Dense LLaMA-7B} \\\\",
+        "\\cmidrule(lr){3-4} \\cmidrule(lr){5-6} \\cmidrule(lr){7-8}",
+        "Family & Ratio & Total (s) & Decode (ms/tok) & Decode & E2E & Decode & E2E \\\\",
         "\\midrule",
     ]
-    for row in runtime:
+    previous_family = None
+    for row in family_rows:
+        if row["family"] != previous_family and previous_family is not None:
+            lines.append("\\midrule")
+        family_label = row["family"] if row["family"] != previous_family else ""
         lines.append(
-            f"{row['baseline']} & {row['config']} & "
-            f"{row['baseline_decode_ms']:.3f} & {row['flash_decode_ms']:.3f} & {row['decode_speedup']:.2f}$\\times$ & "
-            f"{row['baseline_total_s']:.3f} & {row['flash_total_s']:.3f} & {row['e2e_speedup']:.2f}$\\times$ \\\\"
+            f"{family_label} & {row['ratio']} & "
+            f"{row['flash_total_s']:.3f} & {row['flash_decode_ms']:.3f} & "
+            f"{row['densekv_decode_speedup']:.2f}$\\times$ & {row['densekv_e2e_speedup']:.2f}$\\times$ & "
+            f"{row['dense_decode_speedup']:.2f}$\\times$ & {row['dense_e2e_speedup']:.2f}$\\times$ \\\\"
         )
+        previous_family = row["family"]
     lines.extend(
         [
-            "\\bottomrule",
-            "\\end{tabular}",
-            "\\begin{tablenotes}[flushleft]\\footnotesize",
-            "\\item All values are repeated-run medians under matched checkpoint, precision, and hardware settings.",
-            "\\item Decode is reported in ms/token and total latency is prefill plus decode.",
-            "\\end{tablenotes}",
-            "\\end{threeparttable}",
-            "\\end{table}",
-            "",
-            "\\begin{table}[t]",
-            "\\centering",
-            "\\small",
-            "\\begin{threeparttable}",
-            "\\caption{Average FlashSVD v1.5 speedup across supported low-rank checkpoint families under the unified LLaMA-7B serving configuration.}",
-            "\\label{tab:flashsvd-family-coverage}",
-            "\\begin{tabular}{lrrrr}",
-            "\\toprule",
-            "Family & Checkpoints & Prefill speedup & Decode speedup & E2E speedup \\\\",
             "\\midrule",
-        ]
-    )
-    for row in families:
-        lines.append(
-            f"{row['family']} & {row['n']} & "
-            f"{row['prefill_speedup']:.2f}$\\times$ & {row['decode_speedup']:.2f}$\\times$ & {row['e2e_speedup']:.2f}$\\times$ \\\\"
-        )
-    lines.extend(
-        [
+            (
+                f"Overall avg & {overall['n']} ckpts & -- & -- & "
+                f"{overall['decode_speedup']:.2f}$\\times$ & {overall['e2e_speedup']:.2f}$\\times$ & "
+                f"{dense_decode_avg:.2f}$\\times$ & {dense_e2e_avg:.2f}$\\times$ \\\\"
+            ),
             "\\bottomrule",
             "\\end{tabular}",
             "\\begin{tablenotes}[flushleft]\\footnotesize",
-            "\\item Each family average is computed over the matched open-source checkpoints in LowRankArena. End-to-end speedup is computed on prefill plus 32-token decode.",
-            "\\end{tablenotes}",
-            "\\end{threeparttable}",
-            "\\end{table}",
-            "",
-            "\\begin{table}[t]",
-            "\\centering",
-            "\\small",
-            "\\begin{threeparttable}",
-            "\\caption{Extended long-prompt results averaged over ratios 0.5--0.8 at batch size 1.}",
-            "\\label{tab:flashsvd-long-prompt}",
-            "\\begin{tabular}{llrrrrrr}",
-            "\\toprule",
-            "Baseline & Prompt & Base decode & Flash decode & Decode speedup & Base total & Flash total & E2E speedup \\\\",
-            "\\midrule",
-        ]
-    )
-    for row in long_prompt:
-        lines.append(
-            f"{row['baseline']} & {row['prompt']} & "
-            f"{row['baseline_decode_ms']:.3f} & {row['flash_decode_ms']:.3f} & {row['decode_speedup']:.2f}$\\times$ & "
-            f"{row['baseline_total_s']:.3f} & {row['flash_total_s']:.3f} & {row['e2e_speedup']:.2f}$\\times$ \\\\"
-        )
-    lines.extend(
-        [
-            "\\bottomrule",
-            "\\end{tabular}",
-            "\\begin{tablenotes}[flushleft]\\footnotesize",
-            "\\item Decode is reported in ms/token and total latency is prefill plus 128-token decode. Each row averages median results from the ratio sweep.",
-            "\\end{tablenotes}",
-            "\\end{threeparttable}",
-            "\\end{table}",
-            "",
-            "\\begin{table}[t]",
-            "\\centering",
-            "\\small",
-            "\\begin{threeparttable}",
-            "\\caption{Extended decode-length sweep averaged over ratios 0.5--0.8 at batch size 1.}",
-            "\\label{tab:flashsvd-decode-sweep}",
-            "\\begin{tabular}{llrrr}",
-            "\\toprule",
-            "Baseline & Generated tokens & Base decode & Flash decode & Decode speedup \\\\",
-            "\\midrule",
-        ]
-    )
-    for row in sweep_rows:
-        lines.append(
-            f"{row['baseline']} & {row['tokens']} & {row['baseline_decode_ms']:.3f} & {row['flash_decode_ms']:.3f} & {row['decode_speedup']:.2f}$\\times$ \\\\"
-        )
-    lines.extend(
-        [
-            "\\bottomrule",
-            "\\end{tabular}",
-            "\\begin{tablenotes}[flushleft]\\footnotesize",
-            "\\item Decode is reported in ms/token. The sweep spans 64 to 16384 generated tokens; the table keeps a representative subset including the 16K endpoint.",
+            "\\item DenseKV baseline uses the same compressed checkpoint with the aligned dense-KV runtime from the LowRankArena benchmark. Dense LLaMA-7B uses \\texttt{jeffwan/llama-7b-hf} under the standard dense serving path.",
+            (
+                f"\\item Dense LLaMA-7B baseline numbers are prefill $={dense['prefill_s']:.3f}$ s, decode "
+                f"$={dense['decode_ms']:.3f}$ ms/token, end-to-end $={dense['e2e_s']:.3f}$ s."
+            ),
+            "\\item End-to-end latency is prefill plus 32-token decode. Basis Sharing checkpoints at ratios 0.7 and 0.8 are unavailable in the public release and are therefore omitted.",
+            f"\\item Appendix results retain long-prompt averages of {long_prompt_decode_min:.2f}$\\times$--{long_prompt_decode_max:.2f}$\\times$ decode and {long_prompt_e2e_min:.2f}$\\times$--{long_prompt_e2e_max:.2f}$\\times$ end-to-end speedup, plus a decode-length sweep with {sweep_min:.2f}$\\times$--{sweep_max:.2f}$\\times$ average decode speedup over 64--16384 generated tokens.",
             "\\end{tablenotes}",
             "\\end{threeparttable}",
             "\\end{table}",
@@ -956,7 +1008,7 @@ This folder contains a compact, main-text-oriented results package derived from 
 
 - `main/figure_main.pdf`: one compact figure for headline runtime results, family coverage, and long-prompt behavior.
 - `ablation/figure_ablation.pdf`: one compact figure for graph granularity and supporting runtime ablations.
-- `main/table_main.tex`: main repeated-run table, family summary table, long-prompt table, and decode-length sweep table up to 16K generated tokens.
+- `main/table_main.tex`: one unified main-text table over the public LowRankArena checkpoint sweep, with one row per family/ratio entry and grouped columns for FlashSVD absolute latency plus speedups against DenseKV and dense LLaMA-7B baselines.
 - `ablation/table_ablation.tex`: graph ablation, fragmentation counts, attention-route microbench, and kernel micro-ablation tables.
 
 ## Notes

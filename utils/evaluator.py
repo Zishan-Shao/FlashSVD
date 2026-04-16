@@ -49,14 +49,21 @@ def _manual_llama_decode_step(
     inner = model.model
     hidden_states = inner.embed_tokens(input_ids)
     position_ids = cache_position.unsqueeze(0)
-    causal_mask = create_causal_mask(
-        config=model.config,
-        input_embeds=hidden_states,
-        attention_mask=attention_mask,
-        cache_position=cache_position,
-        past_key_values=past_key_values,
-        position_ids=position_ids,
-    )
+    mask_kwargs = {
+        "config": model.config,
+        "input_embeds": hidden_states,
+        "attention_mask": attention_mask,
+        "cache_position": cache_position,
+        "past_key_values": past_key_values,
+        "position_ids": position_ids,
+    }
+    try:
+        causal_mask = create_causal_mask(**mask_kwargs)
+    except TypeError as exc:
+        if "position_ids" not in str(exc):
+            raise
+        mask_kwargs.pop("position_ids", None)
+        causal_mask = create_causal_mask(**mask_kwargs)
     position_embeddings = inner.rotary_emb(hidden_states, position_ids)
 
     for decoder_layer in inner.layers[: model.config.num_hidden_layers]:
