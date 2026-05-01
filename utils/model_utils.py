@@ -85,25 +85,25 @@ def _strip_hf_source_prefix(raw: str) -> str:
     return value
 
 
-LOWRANKARENA_REPO_ALIAS = "LowRankArena"
-LOWRANKARENA_REPO_ENV = "FLASHSVD_LOWRANKARENA_REPO_ID"
+REVIEW_ARTIFACT_REPO_ALIAS = "ReviewArtifacts"
+REVIEW_ARTIFACT_REPO_ENV = "FLASHSVD_REVIEW_ARTIFACT_REPO_ID"
 
 
-def _is_lowrankarena_repo_alias(repo_id: str) -> bool:
-    return str(repo_id).strip().strip("/") == LOWRANKARENA_REPO_ALIAS
+def _is_review_artifacts_repo_alias(repo_id: str) -> bool:
+    return str(repo_id).strip().strip("/") == REVIEW_ARTIFACT_REPO_ALIAS
 
 
 def _resolve_hf_repo_id(repo_id: str) -> str:
     cleaned = str(repo_id).strip().strip("/")
-    if not _is_lowrankarena_repo_alias(cleaned):
+    if not _is_review_artifacts_repo_alias(cleaned):
         return cleaned
 
-    resolved = os.environ.get(LOWRANKARENA_REPO_ENV, "").strip().strip("/")
+    resolved = os.environ.get(REVIEW_ARTIFACT_REPO_ENV, "").strip().strip("/")
     if resolved:
         return resolved
     raise ValueError(
-        f"{LOWRANKARENA_REPO_ALIAS} is an anonymous review alias. Set "
-        f"{LOWRANKARENA_REPO_ENV}=<namespace>/<repo> before loading it, "
+        f"{REVIEW_ARTIFACT_REPO_ALIAS} is an anonymous review alias. Set "
+        f"{REVIEW_ARTIFACT_REPO_ENV}=<namespace>/<repo> before loading it, "
         "or pass an explicit namespace/repo::subfolder checkpoint source."
     )
 
@@ -124,7 +124,7 @@ def _parse_hf_repo_subfolder_source(source: str) -> Optional[tuple[str, str]]:
         return None
 
     parts = [part for part in raw.split("/") if part]
-    if len(parts) >= 2 and _is_lowrankarena_repo_alias(parts[0]):
+    if len(parts) >= 2 and _is_review_artifacts_repo_alias(parts[0]):
         return parts[0], "/".join(parts[1:])
     if len(parts) < 3:
         return None

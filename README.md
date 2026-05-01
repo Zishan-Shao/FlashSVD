@@ -114,10 +114,10 @@ From the repository root, the following copy-paste command runs the FlashSVD
 v1.5 demo checkpoint end to end:
 
 ```bash
-export FLASHSVD_LOWRANKARENA_REPO_ID="<hf-namespace>/<hf-repo>"
+export FLASHSVD_REVIEW_ARTIFACT_REPO_ID="<hf-namespace>/<hf-repo>"
 
 CUDA_VISIBLE_DEVICES=0 python demo_flashsvd_v15.py \
-  --checkpoint LowRankArena::llama_7b/Basis_Sharing/share_llama-7b_20 \
+  --checkpoint ReviewArtifacts::llama_7b/Basis_Sharing/share_llama-7b_20 \
   --device cuda \
   --dtype auto \
   --prompt "Explain in one sentence: FlashSVD accelerates low-rank language models by" \
@@ -127,8 +127,8 @@ CUDA_VISIBLE_DEVICES=0 python demo_flashsvd_v15.py \
 
 If you already have the `flashsvdv15` environment from the installation step
 active, that command should run directly without any local checkpoint
-preparation after `FLASHSVD_LOWRANKARENA_REPO_ID` points at the review or
-artifact Hugging Face mirror. The `LowRankArena::...` prefix is an anonymous
+preparation after `FLASHSVD_REVIEW_ARTIFACT_REPO_ID` points at the review or
+artifact Hugging Face mirror. The `ReviewArtifacts::...` prefix is an anonymous
 alias for review builds; it loads the `Basis Sharing 0.8` LLaMA-7B export,
 which is not the fastest public example but is a much better first-run demo
 checkpoint than the `SVD-LLM v1 update 0.5` export.

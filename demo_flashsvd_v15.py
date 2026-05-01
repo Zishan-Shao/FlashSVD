@@ -17,11 +17,11 @@ if str(ROOT) not in sys.path:
 from scripts.demo_support import configure_runtime, generate_text, load_for_inference
 
 
-LOWRANKARENA_EXAMPLE = (
-    "LowRankArena::"
+REVIEW_ARTIFACT_EXAMPLE = (
+    "ReviewArtifacts::"
     "llama_7b/Basis_Sharing/share_llama-7b_20"
 )
-LOWRANKARENA_REPO_ENV = "FLASHSVD_LOWRANKARENA_REPO_ID"
+REVIEW_ARTIFACT_REPO_ENV = "FLASHSVD_REVIEW_ARTIFACT_REPO_ID"
 
 
 def _maybe_sync(device: str | torch.device) -> None:
@@ -51,8 +51,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description="Run a single-prompt FlashSVD v1.5 generation demo",
         epilog=(
-            "Example LowRankArena checkpoint: "
-            f"{LOWRANKARENA_EXAMPLE}"
+            "Example ReviewArtifacts checkpoint: "
+            f"{REVIEW_ARTIFACT_EXAMPLE}"
         ),
     )
     ap.add_argument(
@@ -61,16 +61,16 @@ def main() -> int:
         help=(
             "Checkpoint source. Accepts a local directory, a trusted local .pt checkpoint, "
             "a Hugging Face repo id, or a repo subfolder like namespace/repo::path/to/export. "
-            f"Review alias example: {LOWRANKARENA_EXAMPLE}"
+            f"Review alias example: {REVIEW_ARTIFACT_EXAMPLE}"
         ),
     )
     ap.add_argument(
-        "--lowrankarena-repo-id",
+        "--review-artifact-repo-id",
         type=str,
         default=None,
         help=(
-            "Optional Hugging Face repo id backing the LowRankArena:: review alias. "
-            f"Defaults to ${LOWRANKARENA_REPO_ENV}."
+            "Optional Hugging Face repo id backing the ReviewArtifacts:: review alias. "
+            f"Defaults to ${REVIEW_ARTIFACT_REPO_ENV}."
         ),
     )
     ap.add_argument(
@@ -102,8 +102,8 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    if args.lowrankarena_repo_id:
-        os.environ[LOWRANKARENA_REPO_ENV] = str(args.lowrankarena_repo_id).strip()
+    if args.review_artifact_repo_id:
+        os.environ[REVIEW_ARTIFACT_REPO_ENV] = str(args.review_artifact_repo_id).strip()
 
     runtime_cfg = configure_runtime(
         mode=args.mode,

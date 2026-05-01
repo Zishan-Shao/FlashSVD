@@ -57,18 +57,18 @@ def test_configure_runtime_flashsvd_smoke():
     assert cfg["FLASH_SVD_DENSE_DECODE_AUTOTUNE_SCOPE"] == "attention"
 
 
-def test_lowrankarena_review_alias_resolves_from_env(monkeypatch):
-    monkeypatch.setenv(model_utils.LOWRANKARENA_REPO_ENV, "anonymous/review-artifact")
+def test_review_artifacts_review_alias_resolves_from_env(monkeypatch):
+    monkeypatch.setenv(model_utils.REVIEW_ARTIFACT_REPO_ENV, "anonymous/review-artifact")
 
-    assert model_utils._parse_hf_repo_subfolder_source("LowRankArena::llama_7b/example") == (
-        "LowRankArena",
+    assert model_utils._parse_hf_repo_subfolder_source("ReviewArtifacts::llama_7b/example") == (
+        "ReviewArtifacts",
         "llama_7b/example",
     )
-    assert model_utils._parse_hf_repo_subfolder_source("LowRankArena/llama_7b/example") == (
-        "LowRankArena",
+    assert model_utils._parse_hf_repo_subfolder_source("ReviewArtifacts/llama_7b/example") == (
+        "ReviewArtifacts",
         "llama_7b/example",
     )
-    assert model_utils._resolve_hf_repo_id("LowRankArena") == "anonymous/review-artifact"
+    assert model_utils._resolve_hf_repo_id("ReviewArtifacts") == "anonymous/review-artifact"
 
 
 def test_generate_text_smoke_cpu():

@@ -17,4 +17,4 @@ def test_demo_cli_help():
     assert proc.returncode == 0, proc.stderr
     assert "FlashSVD v1.5 generation demo" in proc.stdout
     assert "--warmup-tokens" in proc.stdout
-    assert "LowRankArena::" in proc.stdout
+    assert "ReviewArtifacts::" in proc.stdout

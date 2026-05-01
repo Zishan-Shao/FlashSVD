@@ -21,8 +21,8 @@ if str(ROOT) not in sys.path:
 from benchmark.decode.bench_flashsvd_vs_svd_decode import _bench_one_mode
 
 
-LOWRANKARENA_REPO_ALIAS = "LowRankArena"
-LOWRANKARENA_REPO_ENV = "FLASHSVD_LOWRANKARENA_REPO_ID"
+REVIEW_ARTIFACT_REPO_ALIAS = "ReviewArtifacts"
+REVIEW_ARTIFACT_REPO_ENV = "FLASHSVD_REVIEW_ARTIFACT_REPO_ID"
 COMMON_RATIOS = ("0.4", "0.5", "0.6")
 
 
@@ -46,30 +46,30 @@ class SVDLLMV1Spec(FamilySpec):
         return f"llama_7b/SVDLLM/jeffwan_llama_7b_hf_whitening_only_{ratio_text}_hf"
 
     def local_root(self, ratio_text: str) -> Path:
-        return WORKSPACE / "models" / "lowrankarena" / f"svdllm_whitening_only_{ratio_text}"
+        return WORKSPACE / "models" / "review_artifacts" / f"svdllm_whitening_only_{ratio_text}"
 
 
 class SVDLLMV2Spec(FamilySpec):
     def hf_subdir(self, ratio_text: str) -> str:
-        # Public LowRankArena SVD-LLM v2 checkpoints are named by removed ratio
+        # Review artifact SVD-LLM v2 checkpoints are named by removed ratio
         # (e.g. keep=0.8 -> r20, keep=0.7 -> r30).
         pct = int(round((1.0 - float(ratio_text)) * 100))
         return f"llama_7b/SVDLLMv2/jeffwan_llama_7b_hf_svdllmv2_r{pct}_hf"
 
     def local_root(self, ratio_text: str) -> Path:
-        return WORKSPACE / "models" / "lowrankarena" / f"svdllmv2_keep{ratio_text}"
+        return WORKSPACE / "models" / "review_artifacts" / f"svdllmv2_keep{ratio_text}"
 
 
 class BasisSharingSpec(FamilySpec):
     def hf_subdir(self, ratio_text: str) -> str:
-        # Public LowRankArena Basis Sharing checkpoints are also named by removed ratio
+        # Review artifact Basis Sharing checkpoints are also named by removed ratio
         # (e.g. keep=0.8 -> share_llama-7b_20, keep=0.7 -> share_llama-7b_30).
         pct = int(round((1.0 - float(ratio_text)) * 100))
         return f"llama_7b/Basis_Sharing/share_llama-7b_{pct}"
 
     def local_root(self, ratio_text: str) -> Path:
         pct = int(round((1.0 - float(ratio_text)) * 100))
-        return WORKSPACE / "models" / "lowrankarena" / f"basis_sharing_{pct}"
+        return WORKSPACE / "models" / "review_artifacts" / f"basis_sharing_{pct}"
 
 
 FAMILY_SPECS: dict[str, FamilySpec] = {
@@ -79,13 +79,13 @@ FAMILY_SPECS: dict[str, FamilySpec] = {
 }
 
 
-def _lowrankarena_repo_id() -> str:
-    repo_id = os.environ.get(LOWRANKARENA_REPO_ENV, "").strip().strip("/")
+def _review_artifacts_repo_id() -> str:
+    repo_id = os.environ.get(REVIEW_ARTIFACT_REPO_ENV, "").strip().strip("/")
     if repo_id:
         return repo_id
     raise RuntimeError(
-        f"Set {LOWRANKARENA_REPO_ENV}=<namespace>/<repo> before downloading "
-        f"{LOWRANKARENA_REPO_ALIAS} checkpoints."
+        f"Set {REVIEW_ARTIFACT_REPO_ENV}=<namespace>/<repo> before downloading "
+        f"{REVIEW_ARTIFACT_REPO_ALIAS} checkpoints."
     )
 
 
@@ -99,7 +99,7 @@ def _download_checkpoint(spec: FamilySpec, ratio_text: str) -> Path:
     local_root.mkdir(parents=True, exist_ok=True)
     subdir = spec.hf_subdir(ratio_text)
     snapshot_download(
-        repo_id=_lowrankarena_repo_id(),
+        repo_id=_review_artifacts_repo_id(),
         repo_type="model",
         allow_patterns=[f"{subdir}/*"],
         local_dir=str(local_root),
@@ -216,7 +216,7 @@ def _build_markdown(
     md_path: Path,
 ) -> str:
     lines: list[str] = []
-    lines.append("# LowRankArena Main Table Results")
+    lines.append("# ReviewArtifacts Main Table Results")
     lines.append("")
     lines.append(f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append("")
@@ -308,7 +308,7 @@ def _build_markdown(
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser("Collect FlashSVD main-table results on LowRankArena checkpoints")
+    ap = argparse.ArgumentParser("Collect FlashSVD main-table results on ReviewArtifacts checkpoints")
     ap.add_argument(
         "--families",
         type=str,
@@ -334,12 +334,12 @@ def main() -> int:
     ap.add_argument(
         "--md_out",
         type=str,
-        default=str(WORKSPACE / "results" / "docs_notes_archive" / "lowrankarena_main_table_2026-03-17.md"),
+        default=str(WORKSPACE / "results" / "docs_notes_archive" / "review_artifacts_main_table_2026-03-17.md"),
     )
     ap.add_argument(
         "--json_out",
         type=str,
-        default=str(WORKSPACE / "results" / "docs_notes_archive" / "lowrankarena_main_table_2026-03-17.json"),
+        default=str(WORKSPACE / "results" / "docs_notes_archive" / "review_artifacts_main_table_2026-03-17.json"),
     )
     args = ap.parse_args()
 
