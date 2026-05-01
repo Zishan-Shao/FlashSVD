@@ -11,6 +11,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts import demo_support
+from utils import model_utils
 
 
 class _TinyTokenizer:
@@ -54,6 +55,20 @@ def test_configure_runtime_flashsvd_smoke():
     assert cfg["FLASH_SVD_DENSE_DECODE_BACKEND"] == "auto"
     assert cfg["FLASH_SVD_DENSE_DECODE_GRAPH"] == "1"
     assert cfg["FLASH_SVD_DENSE_DECODE_AUTOTUNE_SCOPE"] == "attention"
+
+
+def test_lowrankarena_review_alias_resolves_from_env(monkeypatch):
+    monkeypatch.setenv(model_utils.LOWRANKARENA_REPO_ENV, "anonymous/review-artifact")
+
+    assert model_utils._parse_hf_repo_subfolder_source("LowRankArena::llama_7b/example") == (
+        "LowRankArena",
+        "llama_7b/example",
+    )
+    assert model_utils._parse_hf_repo_subfolder_source("LowRankArena/llama_7b/example") == (
+        "LowRankArena",
+        "llama_7b/example",
+    )
+    assert model_utils._resolve_hf_repo_id("LowRankArena") == "anonymous/review-artifact"
 
 
 def test_generate_text_smoke_cpu():

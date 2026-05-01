@@ -10,6 +10,7 @@ OUTDIR="${OUTDIR:-$ROOT_DIR/results/$RUN_TAG}"
 RAW_DIR="$OUTDIR/raw"
 POLL_SECONDS="${POLL_SECONDS:-10}"
 COOLDOWN_SECONDS="${COOLDOWN_SECONDS:-20}"
+LOWRANKARENA_SOURCE_PREFIX="${LOWRANKARENA_SOURCE_PREFIX:-LowRankArena::}"
 
 mkdir -p "$RAW_DIR"
 
@@ -30,7 +31,7 @@ run_case() {
   local baseline="$2"
   local prompt_len="$3"
   local new_tokens="$4"
-  local src="Duke-CEI-SVD/LowRankArena::llama_7b/SVDLLM/jeffwan_llama_7b_hf_whitening_only_${ratio}_hf"
+  local src="${LOWRANKARENA_SOURCE_PREFIX}llama_7b/SVDLLM/jeffwan_llama_7b_hf_whitening_only_${ratio}_hf"
   local baseline_flag=""
   local log="$RAW_DIR/ratio_${ratio}_${baseline}_p${prompt_len}_n${new_tokens}.log"
   local attempt=1

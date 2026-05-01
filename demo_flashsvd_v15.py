@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
 import sys
@@ -17,9 +18,10 @@ from scripts.demo_support import configure_runtime, generate_text, load_for_infe
 
 
 LOWRANKARENA_EXAMPLE = (
-    "Duke-CEI-SVD/LowRankArena::"
+    "LowRankArena::"
     "llama_7b/Basis_Sharing/share_llama-7b_20"
 )
+LOWRANKARENA_REPO_ENV = "FLASHSVD_LOWRANKARENA_REPO_ID"
 
 
 def _maybe_sync(device: str | torch.device) -> None:
@@ -59,7 +61,16 @@ def main() -> int:
         help=(
             "Checkpoint source. Accepts a local directory, a trusted local .pt checkpoint, "
             "a Hugging Face repo id, or a repo subfolder like namespace/repo::path/to/export. "
-            f"Example: {LOWRANKARENA_EXAMPLE}"
+            f"Review alias example: {LOWRANKARENA_EXAMPLE}"
+        ),
+    )
+    ap.add_argument(
+        "--lowrankarena-repo-id",
+        type=str,
+        default=None,
+        help=(
+            "Optional Hugging Face repo id backing the LowRankArena:: review alias. "
+            f"Defaults to ${LOWRANKARENA_REPO_ENV}."
         ),
     )
     ap.add_argument(
@@ -90,6 +101,9 @@ def main() -> int:
         help="Optional extra untimed warmup decode length inserted between the cold and steady-state measurements.",
     )
     args = ap.parse_args()
+
+    if args.lowrankarena_repo_id:
+        os.environ[LOWRANKARENA_REPO_ENV] = str(args.lowrankarena_repo_id).strip()
 
     runtime_cfg = configure_runtime(
         mode=args.mode,

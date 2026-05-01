@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 import statistics
@@ -20,7 +21,8 @@ if str(ROOT) not in sys.path:
 from benchmark.decode.bench_flashsvd_vs_svd_decode import _bench_one_mode
 
 
-REPO_ID = "Duke-CEI-SVD/LowRankArena"
+LOWRANKARENA_REPO_ALIAS = "LowRankArena"
+LOWRANKARENA_REPO_ENV = "FLASHSVD_LOWRANKARENA_REPO_ID"
 COMMON_RATIOS = ("0.4", "0.5", "0.6")
 
 
@@ -77,6 +79,16 @@ FAMILY_SPECS: dict[str, FamilySpec] = {
 }
 
 
+def _lowrankarena_repo_id() -> str:
+    repo_id = os.environ.get(LOWRANKARENA_REPO_ENV, "").strip().strip("/")
+    if repo_id:
+        return repo_id
+    raise RuntimeError(
+        f"Set {LOWRANKARENA_REPO_ENV}=<namespace>/<repo> before downloading "
+        f"{LOWRANKARENA_REPO_ALIAS} checkpoints."
+    )
+
+
 def _download_checkpoint(spec: FamilySpec, ratio_text: str) -> Path:
     ckpt_path = spec.checkpoint_path(ratio_text)
     cfg_path = ckpt_path / "config.json"
@@ -87,7 +99,7 @@ def _download_checkpoint(spec: FamilySpec, ratio_text: str) -> Path:
     local_root.mkdir(parents=True, exist_ok=True)
     subdir = spec.hf_subdir(ratio_text)
     snapshot_download(
-        repo_id=REPO_ID,
+        repo_id=_lowrankarena_repo_id(),
         repo_type="model",
         allow_patterns=[f"{subdir}/*"],
         local_dir=str(local_root),
