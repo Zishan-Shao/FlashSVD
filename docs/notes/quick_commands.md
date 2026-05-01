@@ -3,7 +3,7 @@
 Run from:
 
 ```bash
-cd /home/zs89/FlashSVD/FlashSVD-v1.5
+cd /path/to/FlashSVD/FlashSVD-v1.5
 ```
 
 Use [`CURRENT_STATUS.md`](./CURRENT_STATUS.md) for the latest verified numbers.
@@ -15,7 +15,7 @@ Exact dense-KV correctness:
 ```bash
 CUDA_VISIBLE_DEVICES=5 FLASH_SVD_TRUST_PICKLE=1 \
 python benchmark/decode/check_flashsvd_decode_correctness.py \
-  --checkpoint /home/zs89/FlashSVD/checkpoints/jeffwan_llama_7b_hf_whitening_only_0.5.pt \
+  --checkpoint /path/to/FlashSVD/checkpoints/jeffwan_llama_7b_hf_whitening_only_0.5.pt \
   --dtype bf16 \
   --device cuda \
   --batch_size 1 \
@@ -34,7 +34,7 @@ Exact-aligned dense-KV decode benchmark:
 ```bash
 CUDA_VISIBLE_DEVICES=5 FLASH_SVD_TRUST_PICKLE=1 \
 python benchmark/decode/bench_flashsvd_vs_svd_decode.py \
-  --checkpoint /home/zs89/FlashSVD/checkpoints/jeffwan_llama_7b_hf_whitening_only_0.5.pt \
+  --checkpoint /path/to/FlashSVD/checkpoints/jeffwan_llama_7b_hf_whitening_only_0.5.pt \
   --dtype bf16 \
   --device cuda \
   --prompt_len 512 \
@@ -51,7 +51,7 @@ Faster packed serving decode benchmark:
 ```bash
 CUDA_VISIBLE_DEVICES=5 FLASH_SVD_TRUST_PICKLE=1 \
 python benchmark/decode/bench_flashsvd_vs_svd_decode.py \
-  --checkpoint /home/zs89/FlashSVD/checkpoints/jeffwan_llama_7b_hf_whitening_only_0.5.pt \
+  --checkpoint /path/to/FlashSVD/checkpoints/jeffwan_llama_7b_hf_whitening_only_0.5.pt \
   --dtype bf16 \
   --device cuda \
   --prompt_len 512 \
@@ -69,7 +69,7 @@ Full-sequence eval / PPL-aligned eval:
 CUDA_VISIBLE_DEVICES=5 FLASH_SVD_TRUST_PICKLE=1 \
 python SVDLLM_flashsvd.py \
   --model jeffwan/llama-7b-hf \
-  --model_path /home/zs89/FlashSVD/checkpoints/jeffwan_llama_7b_hf_whitening_only_0.5.pt \
+  --model_path /path/to/FlashSVD/checkpoints/jeffwan_llama_7b_hf_whitening_only_0.5.pt \
   --step 4 \
   --dataset wikitext2 \
   --DEV cuda \
@@ -122,7 +122,7 @@ Real-checkpoint MLP benchmark:
 ```bash
 CUDA_VISIBLE_DEVICES=5 FLASH_SVD_TRUST_PICKLE=1 \
 python benchmark/mlp/bench_real_checkpoint_mlp.py \
-  --checkpoint /home/zs89/FlashSVD/checkpoints/jeffwan_llama_7b_hf_whitening_only_0.5.pt \
+  --checkpoint /path/to/FlashSVD/checkpoints/jeffwan_llama_7b_hf_whitening_only_0.5.pt \
   --dtype bf16 \
   --device cuda \
   --layer 0 \

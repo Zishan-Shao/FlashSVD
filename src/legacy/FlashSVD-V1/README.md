@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![GitHub Stars](https://img.shields.io/github/stars/Zishan-Shao/FlashSVD?style=social)](https://github.com/Zishan-Shao/FlashSVD)
+[![GitHub Stars](https://img.shields.io/github/stars/anonymous-review/FlashSVD?style=social)](https://github.com/anonymous-review/FlashSVD)
 
 This repository contains the official implementation of **FlashSVD**, a novel end-to-end rank-aware streaming inference framework specifically designed for SVD-compressed large language models. FlashSVD addresses the critical limitation of previous SVD-based compression techniques by eliminating activation memory overhead during inference.
 
@@ -11,7 +11,7 @@ This repository contains the official implementation of **FlashSVD**, a novel en
 
 - Issues and bugs: please open a GitHub issue.
 - Feature requests (e.g., new model support or SVD methods): open an issue with details.
-- Collaboration or questions: email Zishan at zs89@duke.edu.
+- Collaboration or questions: contact the authors after review.
 
 We aim to respond promptly. This is an active, long-term project, and we welcome community contributions.
 
@@ -19,7 +19,7 @@ We aim to respond promptly. This is an active, long-term project, and we welcome
 
 > 🙏 If you find FlashSVD useful in your research, we kindly ask that you `cite our paper` (see [Citation](#citation)). If this repository is helpful, please consider `starring 🌟` it to support the project — thank you!
 >
-> [![Cite FlashSVD](https://img.shields.io/badge/Cite-FlashSVD-brightgreen)](#citation) [![Star this repo](https://img.shields.io/badge/Star-This%20repo-yellow?logo=github)](https://github.com/Zishan-Shao/FlashSVD/stargazers)
+> [![Cite FlashSVD](https://img.shields.io/badge/Cite-FlashSVD-brightgreen)](#citation) [![Star this repo](https://img.shields.io/badge/Star-This%20repo-yellow?logo=github)](https://github.com/anonymous-review/FlashSVD/stargazers)
 
 
 ## 🚀 Announcement
@@ -88,7 +88,7 @@ We introduce **FlashSVD**, a novel, end-to-end rank-aware streaming inference fr
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/Zishan-Shao/FlashSVD.git
+   git clone https://github.com/anonymous-review/FlashSVD.git
    cd FlashSVD
    ```
 
@@ -261,9 +261,9 @@ Our work addresses the critical limitation of previous SVD-based approaches by i
 If you find this work useful in your research, please cite our paper:
 
 ```bibtex
-@article{shao2025flashsvd,
+@article{anonymous2025flashsvd,
   title={FlashSVD: Memory-Efficient Inference with Streaming for Low-Rank Models},
-  author={Shao, Zishan and Wang, Yixiao and Wang, Qinsi and Jiang, Ting and Du, Zhixu and Ye, Hancheng and Zhuo, Danyang and Chen, Yiran and Li, Hai},
+  author={Anonymous Authors},
   journal={arXiv preprint arXiv:2508.01506},
   year={2025}
 }
@@ -291,4 +291,4 @@ FlashSVD/
 
 We welcome contributions! Please feel free to submit issues and pull requests.
 
-**Note**: For support, feature requests, or collaborations, please open a GitHub issue or email Zishan (zs89@duke.edu).
+**Note**: For support, feature requests, or collaborations, please open a GitHub issue after review.

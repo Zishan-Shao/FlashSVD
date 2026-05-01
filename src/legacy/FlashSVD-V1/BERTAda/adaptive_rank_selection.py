@@ -23,7 +23,7 @@ from transformers import BertForSequenceClassification, AutoTokenizer, AutoConfi
 
 CUDA_VISIBLE_DEVICES=3,4,5,6,7 \
 python adaptive_rank_selection.py \
-  --model_dir /home/zs89/FlashSVD/models/BERT/bert-base-uncased-stsb \
+  --model_dir /path/to/FlashSVD/models/BERT/bert-base-uncased-stsb \
   --task_name stsb \
   --p_keep 0.60 \
   --steps 800 \

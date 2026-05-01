@@ -2,14 +2,15 @@
 set -u -o pipefail
 
 GPU_ID="${1:-3}"
-ROOT_DIR="/home/zs89/FlashSVD"
-PYTHON_BIN="/home/zs89/miniconda3/envs/flashsvdv15/bin/python"
+ROOT_DIR="/path/to/FlashSVD"
+PYTHON_BIN="/path/to/miniconda3/envs/flashsvdv15/bin/python"
 BENCH_SCRIPT="$ROOT_DIR/benchmark/decode/bench_flashsvd_vs_svd_decode.py"
 RUN_TAG="${RUN_TAG:-runtime_rerun_2026-04-14_ratio_sweep_v1_perlayer_retry}"
 OUTDIR="${OUTDIR:-$ROOT_DIR/results/$RUN_TAG}"
 RAW_DIR="$OUTDIR/raw"
 POLL_SECONDS="${POLL_SECONDS:-10}"
 COOLDOWN_SECONDS="${COOLDOWN_SECONDS:-20}"
+REVIEW_ARTIFACT_SOURCE_PREFIX="${REVIEW_ARTIFACT_SOURCE_PREFIX:-ReviewArtifacts::}"
 
 mkdir -p "$RAW_DIR"
 
@@ -30,7 +31,7 @@ run_case() {
   local baseline="$2"
   local prompt_len="$3"
   local new_tokens="$4"
-  local src="Duke-CEI-SVD/LowRankArena::llama_7b/SVDLLM/jeffwan_llama_7b_hf_whitening_only_${ratio}_hf"
+  local src="${REVIEW_ARTIFACT_SOURCE_PREFIX}llama_7b/SVDLLM/jeffwan_llama_7b_hf_whitening_only_${ratio}_hf"
   local baseline_flag=""
   local log="$RAW_DIR/ratio_${ratio}_${baseline}_p${prompt_len}_n${new_tokens}.log"
   local attempt=1

@@ -85,6 +85,29 @@ def _strip_hf_source_prefix(raw: str) -> str:
     return value
 
 
+REVIEW_ARTIFACT_REPO_ALIAS = "ReviewArtifacts"
+REVIEW_ARTIFACT_REPO_ENV = "FLASHSVD_REVIEW_ARTIFACT_REPO_ID"
+
+
+def _is_review_artifacts_repo_alias(repo_id: str) -> bool:
+    return str(repo_id).strip().strip("/") == REVIEW_ARTIFACT_REPO_ALIAS
+
+
+def _resolve_hf_repo_id(repo_id: str) -> str:
+    cleaned = str(repo_id).strip().strip("/")
+    if not _is_review_artifacts_repo_alias(cleaned):
+        return cleaned
+
+    resolved = os.environ.get(REVIEW_ARTIFACT_REPO_ENV, "").strip().strip("/")
+    if resolved:
+        return resolved
+    raise ValueError(
+        f"{REVIEW_ARTIFACT_REPO_ALIAS} is an anonymous review alias. Set "
+        f"{REVIEW_ARTIFACT_REPO_ENV}=<namespace>/<repo> before loading it, "
+        "or pass an explicit namespace/repo::subfolder checkpoint source."
+    )
+
+
 def _parse_hf_repo_subfolder_source(source: str) -> Optional[tuple[str, str]]:
     raw = _strip_hf_source_prefix(source)
     if not raw or raw.startswith(("http://", "https://")):
@@ -101,6 +124,8 @@ def _parse_hf_repo_subfolder_source(source: str) -> Optional[tuple[str, str]]:
         return None
 
     parts = [part for part in raw.split("/") if part]
+    if len(parts) >= 2 and _is_review_artifacts_repo_alias(parts[0]):
+        return parts[0], "/".join(parts[1:])
     if len(parts) < 3:
         return None
     repo_id = "/".join(parts[:2])
@@ -144,9 +169,10 @@ def _download_hf_repo_subfolder(repo_id: str, subfolder: str, *, hf_token: Optio
         print("[FlashSVD] Reusing cached HF export from local cache.")
         return local_path
 
+    resolved_repo_id = _resolve_hf_repo_id(repo_id)
     print("[FlashSVD] Downloading HF export into local cache.")
     snapshot_download(
-        repo_id=repo_id,
+        repo_id=resolved_repo_id,
         repo_type="model",
         allow_patterns=[f"{subfolder}/**", f"{subfolder}/*"],
         local_dir=str(repo_root),

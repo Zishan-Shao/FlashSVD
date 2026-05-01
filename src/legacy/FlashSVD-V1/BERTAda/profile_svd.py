@@ -31,13 +31,13 @@ from flash_attn_triton import flash_attn_triton
 
 # Use ranks as-is
 CUDA_VISIBLE_DEVICES=3,4,5,6,7 python profile_svd.py \
-  --model_dir /home/zs89/FlashSVD/models/BERT/bert-base-uncased-stsb \
+  --model_dir /path/to/FlashSVD/models/BERT/bert-base-uncased-stsb \
   --task_name stsb \
   --ranks_path BERTAda/ars_out/ranks.json
 
 # Or shrink further at inference to 85% of ARS budget (no retrain)
 CUDA_VISIBLE_DEVICES=3,4,5,6,7 python profile_svd.py \
-  --model_dir /home/zs89/FlashSVD/models/BERT/bert-base-uncased-stsb \
+  --model_dir /path/to/FlashSVD/models/BERT/bert-base-uncased-stsb \
   --task_name stsb \
   --ranks_path BERTAda/ars_out/ranks.json \
   --ars_ratio_keep 0.85

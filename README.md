@@ -53,7 +53,7 @@ want to run the fused GPU path.
 Recommended environment bootstrap:
 
 ```bash
-git clone https://github.com/Zishan-Shao/FlashSVD.git
+git clone https://github.com/anonymous-review/FlashSVD.git
 cd FlashSVD
 conda env create -f environment.yml
 conda activate flashsvdv15
@@ -110,12 +110,14 @@ print(result["completion_text"])
 
 ### Demo
 
-From the repository root, the following copy-paste command runs the public
-FlashSVD v1.5 demo checkpoint end to end:
+From the repository root, the following copy-paste command runs the FlashSVD
+v1.5 demo checkpoint end to end:
 
 ```bash
+export FLASHSVD_REVIEW_ARTIFACT_REPO_ID="<hf-namespace>/<hf-repo>"
+
 CUDA_VISIBLE_DEVICES=0 python demo_flashsvd_v15.py \
-  --checkpoint Duke-CEI-SVD/LowRankArena::llama_7b/Basis_Sharing/share_llama-7b_20 \
+  --checkpoint ReviewArtifacts::llama_7b/Basis_Sharing/share_llama-7b_20 \
   --device cuda \
   --dtype auto \
   --prompt "Explain in one sentence: FlashSVD accelerates low-rank language models by" \
@@ -125,9 +127,11 @@ CUDA_VISIBLE_DEVICES=0 python demo_flashsvd_v15.py \
 
 If you already have the `flashsvdv15` environment from the installation step
 active, that command should run directly without any local checkpoint
-preparation. It loads the public LowRankArena `Basis Sharing 0.8` LLaMA-7B
-export, which is not the fastest public example but is a much better first-run
-demo checkpoint than the `SVD-LLM v1 update 0.5` export.
+preparation after `FLASHSVD_REVIEW_ARTIFACT_REPO_ID` points at the review or
+artifact Hugging Face mirror. The `ReviewArtifacts::...` prefix is an anonymous
+alias for review builds; it loads the `Basis Sharing 0.8` LLaMA-7B export,
+which is not the fastest public example but is a much better first-run demo
+checkpoint than the `SVD-LLM v1 update 0.5` export.
 
 This configures the current FlashSVD v1.5 serving recipe:
 

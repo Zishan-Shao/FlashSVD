@@ -56,7 +56,7 @@ Command:
 
 ```bash
 python benchmark/decode/check_flashsvd_decode_correctness.py \
-  --checkpoint /home/zs89/FlashSVD/checkpoints/jeffwan_llama_7b_hf_whitening_only_0.5.pt \
+  --checkpoint /path/to/FlashSVD/checkpoints/jeffwan_llama_7b_hf_whitening_only_0.5.pt \
   --dtype bf16 \
   --device cuda \
   --batch_size 1 \
@@ -82,7 +82,7 @@ Command:
 
 ```bash
 python benchmark/decode/check_flashsvd_decode_correctness.py \
-  --checkpoint /home/zs89/FlashSVD/checkpoints/jeffwan_llama_7b_hf_whitening_only_0.5.pt \
+  --checkpoint /path/to/FlashSVD/checkpoints/jeffwan_llama_7b_hf_whitening_only_0.5.pt \
   --dtype bf16 \
   --device cuda \
   --batch_size 1 \
@@ -109,7 +109,7 @@ Command:
 
 ```bash
 python benchmark/decode/bench_flashsvd_vs_svd_decode.py \
-  --checkpoint /home/zs89/FlashSVD/checkpoints/jeffwan_llama_7b_hf_whitening_only_0.5.pt \
+  --checkpoint /path/to/FlashSVD/checkpoints/jeffwan_llama_7b_hf_whitening_only_0.5.pt \
   --dtype bf16 \
   --device cuda \
   --prompt_len 512 \
@@ -133,7 +133,7 @@ Command:
 
 ```bash
 python benchmark/decode/bench_flashsvd_vs_svd_decode.py \
-  --checkpoint /home/zs89/FlashSVD/checkpoints/jeffwan_llama_7b_hf_whitening_only_0.5.pt \
+  --checkpoint /path/to/FlashSVD/checkpoints/jeffwan_llama_7b_hf_whitening_only_0.5.pt \
   --dtype bf16 \
   --device cuda \
   --prompt_len 512 \
