@@ -8,14 +8,14 @@ LLAMA_MODEL=meta-llama/Llama-2-7b-hf \
 DTYPE=float32 SVD_DTYPE=fp32 SVD_COMPUTE_FP32=1 \
 PARAM_RATIO=0.8 BATCH_SIZE=4 SEQ_LEN=2048 CHUNK_SIZE=2048 MAX_EVAL_SAMPLES=0 MAX_EVAL_BATCHES=0 \
 USE_FLASH=1 \
-python3 /home/zs89/FlashSVD/decoders/llama/eval/profile_asvd_llama.py
+python3 /path/to/FlashSVD/decoders/llama/eval/profile_asvd_llama.py
 
 CUDA_VISIBLE_DEVICES=7 \
 LLAMA_MODEL=meta-llama/Llama-2-7b-hf \
 DTYPE=float32 SVD_DTYPE=fp32 SVD_COMPUTE_FP32=1 \
 PARAM_RATIO=0.8 BATCH_SIZE=4 SEQ_LEN=2048 CHUNK_SIZE=2048 MAX_EVAL_SAMPLES=0 MAX_EVAL_BATCHES=0 \
 USE_FLASH=0 \
-python3 /home/zs89/FlashSVD/decoders/llama/eval/profile_asvd_llama.py
+python3 /path/to/FlashSVD/decoders/llama/eval/profile_asvd_llama.py
 
 """
 

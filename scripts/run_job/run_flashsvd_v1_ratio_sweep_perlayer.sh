@@ -2,8 +2,8 @@
 set -u -o pipefail
 
 GPU_ID="${1:-3}"
-ROOT_DIR="/home/zs89/FlashSVD"
-PYTHON_BIN="/home/zs89/miniconda3/envs/flashsvdv15/bin/python"
+ROOT_DIR="/path/to/FlashSVD"
+PYTHON_BIN="/path/to/miniconda3/envs/flashsvdv15/bin/python"
 BENCH_SCRIPT="$ROOT_DIR/benchmark/decode/bench_flashsvd_vs_svd_decode.py"
 RUN_TAG="${RUN_TAG:-runtime_rerun_2026-04-14_ratio_sweep_v1_perlayer_retry}"
 OUTDIR="${OUTDIR:-$ROOT_DIR/results/$RUN_TAG}"

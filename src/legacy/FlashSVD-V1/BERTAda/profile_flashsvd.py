@@ -36,7 +36,7 @@ from flashsvdffnv2 import flashsvd_ffn as flashsvd_ffn_v2  # keep alias
 
 # Use ARS ranks as-is
 CUDA_VISIBLE_DEVICES=3,4,5,6,7 python profile_flashsvd.py \
-  --model_dir /home/zs89/FlashSVD/models/BERT/bert-base-uncased-stsb \
+  --model_dir /path/to/FlashSVD/models/BERT/bert-base-uncased-stsb \
   --task_name stsb \
   --ranks_path BERTAda/ars_out/ranks.json \
   --ars_ratio_keep 0.85 \
@@ -44,7 +44,7 @@ CUDA_VISIBLE_DEVICES=3,4,5,6,7 python profile_flashsvd.py \
 
 # Try a tighter budget (e.g., 85% of ARS params) with Flash kernels
 CUDA_VISIBLE_DEVICES=3,4,5,6,7 python profile_flashsvd.py \
-  --model_dir /home/zs89/FlashSVD/models/BERT/bert-base-uncased-stsb \
+  --model_dir /path/to/FlashSVD/models/BERT/bert-base-uncased-stsb \
   --task_name stsb \
   --ranks_path BERTAda/ars_out/ranks.json \
   --ars_ratio_keep 0.85 \

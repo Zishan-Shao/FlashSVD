@@ -15,7 +15,7 @@ Example:
   python quant/gptq_quantize_ckpt.py --in_ckpt "$CKPT" --wbits 4 --groupsize 128 \
     --calib_dataset wikitext2 --calib_nsamples 32 --calib_seqlen 2048 \
     --eval_datasets wikitext2,ptb,c4 --eval_batch_size 4 --device cuda \
-    --out_ckpt /home/zs89/FlashSVD/checkpoints/quantized/llama2_7b_kr0.4_actlora_lmonly_diverse_big_gptq_w4_g128.pt
+    --out_ckpt /path/to/FlashSVD/checkpoints/quantized/llama2_7b_kr0.4_actlora_lmonly_diverse_big_gptq_w4_g128.pt
 """
 
 import argparse

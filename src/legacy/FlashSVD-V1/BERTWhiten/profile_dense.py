@@ -24,7 +24,7 @@ torch.manual_seed(0)
 
 
 # we need to access this directory first
-# use sys.path(), where the src.fwsvd is located at /home/zs89/FlashSVDFFN/src/fwsvd
+# use sys.path(), where the src.fwsvd is located at /path/to/FlashSVDFFN/src/fwsvd
 THIS_FILE = os.path.abspath(__file__)
 REPO_ROOT = os.path.dirname(os.path.dirname(THIS_FILE))
 if REPO_ROOT not in sys.path:

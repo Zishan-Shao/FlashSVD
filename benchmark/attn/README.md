@@ -12,7 +12,7 @@ Current entrypoints:
 Example:
 
 ```bash
-python /home/zs89/FlashSVD/FlashSVD-v1.5/benchmark/attn/decode_compare.py \
+python /path/to/FlashSVD/FlashSVD-v1.5/benchmark/attn/decode_compare.py \
   --llama llama2-7b \
   --target-param-ratio 0.5 \
   --rank-formula global \

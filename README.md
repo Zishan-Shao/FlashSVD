@@ -53,7 +53,7 @@ want to run the fused GPU path.
 Recommended environment bootstrap:
 
 ```bash
-git clone https://github.com/Zishan-Shao/FlashSVD.git
+git clone https://github.com/anonymous-review/FlashSVD.git
 cd FlashSVD
 conda env create -f environment.yml
 conda activate flashsvdv15
